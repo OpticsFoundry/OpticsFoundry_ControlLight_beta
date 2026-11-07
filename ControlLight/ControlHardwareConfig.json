@@ -6,7 +6,7 @@
     {
       "Id": 0,
       "Type": "OpticsFoundrySequencerV1",
-      "IP": "192.168.0.112",
+      "IP": "192.168.1.187",
       "Port": 57978,
       "Master": true,
       "StartDelay": 10,
@@ -29,8 +29,8 @@
     },
     {
       "Sequencer": 0,
-      "StartAddress": 28,
-      "NumberChannels": 4,
+      "StartAddress": 8,
+      "NumberChannels": 8,
       "Signed": true,
       "MinVoltage": -10,
       "MaxVoltage": 10
@@ -39,7 +39,7 @@
   "DigitalOutBoards": [
     {
       "Sequencer": 0,
-      "Address": 1,
+      "Address": 3  ,
       "NumberChannels": 16
     },
     {
@@ -74,7 +74,23 @@
     {
       "Version": 2,
       "Sequencer": 0,
-      "Address": 132,
+      "Address": 136,
+      "ExternalClockFrequencyinMHz": 10,
+      "PLLReferenceMultiplier": 20,
+      "FrequencyMultiplier": 1
+    },
+    {
+      "Version": 2,
+      "Sequencer": 0,
+      "Address": 156,
+      "ExternalClockFrequencyinMHz": 10,
+      "PLLReferenceMultiplier": 20,
+      "FrequencyMultiplier": 1
+    },
+    {
+      "Version": 2,
+      "Sequencer": 0,
+      "Address": 152,
       "ExternalClockFrequencyinMHz": 10,
       "PLLReferenceMultiplier": 20,
       "FrequencyMultiplier": 1
@@ -97,7 +113,7 @@
   "DDSAD9959Boards": [
     {
       "Sequencer": 0,
-      "Address": 3,
+      "Address": 1,
       "ClockFrequencyinMHz": 500,
       "FrequencyMultiplier": 1,
       "Version": 0.16

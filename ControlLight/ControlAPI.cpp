@@ -127,7 +127,7 @@ bool CLA_InitializeMFC(bool InitializeAfx, bool InitializeAfxSocket) {
 	std::atomic<bool> isBusy{ false };
 	std::mutex apiMutex;
 
-#define API_LOCK_GUARD std::lock_guard<std::mutex> _guard(apiMutex); isBusy = true
+#define API_LOCK_GUARD std::lock_guard<std::mutex> _guard(apiMutex); isBusy = true; NewErrorOccured = false
 #define API_UNLOCK isBusy = false
 
 	//#define USE_IDLE_TICKER
@@ -178,7 +178,7 @@ bool CLA_InitializeMFC(bool InitializeAfx, bool InitializeAfxSocket) {
 
 #else
 
-#define API_LOCK_GUARD
+#define API_LOCK_GUARD NewErrorOccured = false
 #define API_UNLOCK 
 
 #endif // USE_IDLE_TICKER

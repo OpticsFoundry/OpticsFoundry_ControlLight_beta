@@ -663,14 +663,14 @@ void DemoSequence(unsigned long CycleNumber) {
 	//At each moment only one rack slot is allowed to act as input and send data to the FPGA.
 	//This is achieved by a rack slot arbiter on the backplane.
 	//This tests the reliability of the arbiter by blinking the rack slot selection LED, available on e.g. the serial IO board. 
-	for (int j = 1; j < 5; j++) {
-		CLA_SelectRackSlot(SequencerNr, /*RackNr*/ 0, SerialPortSlotNr);
+	for (int j = 0; j < 12; j++) {
+		CLA_SelectRackSlot(SequencerNr, /*RackNr*/ 0, j);
 		CLA_Wait_ms(50);
-		uint8_t r = 16*(rand()/RAND_MAX);
-		if (r == SerialPortSlotNr) r = SerialPortSlotNr+1;
-		if (r > 15) r = 0;
-		CLA_SelectRackSlot(SequencerNr, /*RackNr*/ 0, r);
-		CLA_Wait_ms(50);
+		//uint8_t r = 16*rand()/RAND_MAX;
+		//if (r == SerialPortSlotNr) r = SerialPortSlotNr+1;
+		//if (r > 15) r = 0;
+		//CLA_SelectRackSlot(SequencerNr, /*RackNr*/ 0, r);
+		//CLA_Wait_ms(50);
 	}
 	
 	CLA_SelectRackSlot(SequencerNr, /*RackNr*/ 0, SerialPortSlotNr);
@@ -1073,6 +1073,7 @@ void DemoFPGASequencerSoundBuzzer() {
 	if (!InitializeSystem()) {
 		return;
 	}
+	CLA_SwitchDebugMode(true, "DebugSequencer");  //If on, FPGA sends debug info over USB COM port, which slows it down
 	CLA_StartAssemblingSequence();
 
 	//Test AD9959 DDS

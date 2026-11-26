@@ -135,6 +135,27 @@ elseif(BUILD_MODE STREQUAL "DLL")
         endif()
     endif()
 
+    # Regenerate the API specific part of the Qt wrapper (../ControlLight_Qt_wrapper) whenever ControlAPI.h changes.
+    # The Qt examples load ControlLight.dll through that wrapper, as MinGW can't use ControlAPI.h directly.
+    option(CONTROL_LIGHT_GENERATE_QT_WRAPPER "Regenerate the Qt wrapper in ../ControlLight_Qt_wrapper from ControlAPI.h when building the DLL (needs Python 3)" ON)
+    if(CONTROL_LIGHT_GENERATE_QT_WRAPPER)
+        set(QT_WRAPPER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ControlLight_Qt_wrapper")
+        find_package(Python3 COMPONENTS Interpreter QUIET)
+        if(Python3_Interpreter_FOUND AND EXISTS "${QT_WRAPPER_DIR}/generate_qt_wrapper.py")
+            set(QT_WRAPPER_OUTPUTS
+                "${QT_WRAPPER_DIR}/ControlLightAPI_generated_members.inc"
+                "${QT_WRAPPER_DIR}/ControlLightAPI_generated_methods.inc")
+            add_custom_command(OUTPUT ${QT_WRAPPER_OUTPUTS}
+                COMMAND "${Python3_EXECUTABLE}" "${QT_WRAPPER_DIR}/generate_qt_wrapper.py" --header "${CMAKE_CURRENT_SOURCE_DIR}/ControlAPI.h"
+                DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/ControlAPI.h" "${QT_WRAPPER_DIR}/generate_qt_wrapper.py"
+                COMMENT "Generating Qt wrapper for ControlLight.dll from ControlAPI.h"
+                VERBATIM)
+            add_custom_target(ControlLightQtWrapper ALL DEPENDS ${QT_WRAPPER_OUTPUTS})
+        else()
+            message(STATUS "Python 3 not found: the Qt wrapper in ControlLight_Qt_wrapper is not regenerated automatically. Run generate_qt_wrapper.py after changing ControlAPI.h.")
+        endif()
+    endif()
+
     #optional: move results to target folder
     #install(TARGETS ControlLight DESTINATION lib)
     #install(FILES ControlLight.h DESTINATION include)

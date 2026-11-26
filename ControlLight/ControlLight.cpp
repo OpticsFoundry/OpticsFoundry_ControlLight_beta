@@ -1075,19 +1075,35 @@ void DemoFPGASequencerSoundBuzzer() {
 	}
 	CLA_SwitchDebugMode(true, "DebugSequencer");  //If on, FPGA sends debug info over USB COM port, which slows it down
 	CLA_StartAssemblingSequence();
-
 	//Test AD9959 DDS
-	CLA_Reset(/*SequencerNr*/0, /*AD9959Addr*/ 1);  //ToDo: find out why the sequence only executes correctly if this command is here
+	//Sequencer firmware before 2026-11-26 needed some short commands here (e.g. CLA_Reset(0, 1)) whenever the sequence started with a long wait:
+	//the level-sensitive DMA request interrupt re-triggered and the sequence was aborted. Fixed by making that interrupt edge sensitive.
 	for (int n = 0; n < 2; n++) {
 		CLA_SwitchSequencerBuzzer(/*SequencerNr*/ 0, true);
 		CLA_Wait_ms(50);
 		CLA_SwitchSequencerBuzzer(/*SequencerNr*/ 0, false);
 		CLA_Wait_ms(50);
 	}
-
+	CLA_SequencerWriteSystemTimeToInputMemory(/*SequencerNr*/ 0); //store FPGA counter as a timestamp so that one can easily determine the exact sequence duration
 	CLA_ExecuteSequence("c:\\data\\DebugDemoFPGASequencerSoundBuzzerSequenceWorking.txt"); //Use this version to create debug file
 	//CLA_ExecuteSequence(); //use this version to run without creating debug file
-	CLA_WaitTillEndOfSequence(10);
+	//CLA_WaitTillEndOfSequence(10);
+	uint8_t* buffer_8bit = nullptr;
+	unsigned long buffer_length = 0;
+	unsigned long EndTimeOfCycle = 0;
+	CLA_WaitTillEndOfSequenceThenGetInputData( buffer_8bit, buffer_length, EndTimeOfCycle, 10);
+	buffer_length /= 4;
+	cout << "Return buffer length " << buffer_length << " 32-bit words" << endl;
+	if (buffer_length < 4) {
+		if (buffer_length == 0) cout << "Error: sequence returned nothing" << endl;
+		return;
+	}
+	uint32_t* buffer = (uint32_t*)buffer_8bit;	
+	unsigned long long FPGASystemTimeStart = ((unsigned long long*)buffer)[0]; // in units of the clock period, i.e. usually 10ns
+	unsigned long long FPGASystemTimeAtSequenceEnd = ((unsigned long long*)buffer)[buffer_length/2 - 1]; // in units of the clock period, i.e. usually 10ns
+	unsigned long long SequenceDuration_in_clock_cycles = FPGASystemTimeAtSequenceEnd - FPGASystemTimeStart;
+	double SequenceDuration_in_ms = 0.001*0.001*10.0* SequenceDuration_in_clock_cycles;
+	cout << "Sequence duration " << SequenceDuration_in_ms << "ms = " << SequenceDuration_in_clock_cycles << " clock cycles" << endl;
 }
 
 

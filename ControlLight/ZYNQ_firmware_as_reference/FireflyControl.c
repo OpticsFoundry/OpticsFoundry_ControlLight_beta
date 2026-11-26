@@ -755,6 +755,7 @@ bool LastDMA1Transfer = 1;
 
 void StopSequenceOnError(u8 error_number) {
 	PauseSequence();
+    ResetCore();
 	Sequence_ended_in_error = TRUE;
 	Sequence_running = FALSE;
 	IgnoreTCPIP = FALSE;
@@ -1064,7 +1065,7 @@ bool DoSequenceTransfer(bool write_high_buffer){
 			FireflyControl_print_statistics();
 			return FALSE;
 		} else {
-			if (DebugModeOn) xil_printf("\n\rDoSequenceTransfer: normal extra call (cyc = %d)\n\r",NextDMA0Transfer, ReadLatchedWaitCycles());
+			if (DebugModeOn) xil_printf("\n\rDoSequenceTransfer: normal extra call (DMA0 Nr %d, cyc = %d)\n\r",NextDMA0Transfer, (u32)ReadLatchedWaitCycles());
 			Extra_DMA0_transfer_request_happened = TRUE;
 			DisableAndClearCoreInterrupt();
 			DMA0Error = 0;
@@ -1343,6 +1344,20 @@ int firefly_control_init(XScuGic *InterruptController) {
   	  if (DebugModeOn) xil_printf("firefly_control_interrupt_init: XScuGic_Connect failed\r\n");
   	  return XST_FAILURE;
     }
+
+    // 2026 11 26: make the sequence transfer request interrupt rising-edge sensitive (0x3).
+    // XScuGic_CfgInitialize sets all SPIs to active-high level sensitive. The core's int_out
+    // does not fall when the ISR clears it (DisableAndClearCoreInterrupt), but only at the next
+    // command boundary. If that command is a long wait (e.g. CLA_Wait_ms(50) right at the start
+    // of a sequence), int_out is still high when ExtIrq_Handler returns, so a level-sensitive
+    // GIC immediately re-enters the ISR and a second, bogus DMA0 transfer request is served
+    // ("DMA0 transfer request too much" -> StopSequenceOnError(10) for short sequences; for long
+    // sequences the duplicate request would overwrite a not yet executed BRAM half).
+    // Edge sensitivity gives exactly one ISR call per int_out rising edge.
+    // Must be configured while the interrupt is disabled in the distributor.
+    DisableSequenceTransferRequestInterrupt();
+    XScuGic_SetPriorityTriggerType(InterruptController,
+    		XPAR_FABRIC_AXI_GPIO_4_GPIO_IO_O_INTR, 0xA0, 0x3);
 
     //if (DebugModeOn) xil_printf("firefly_control_interrupt_init: XScuGic_Enable 3\r\n");
     EnableSequenceTransferRequestInterrupt();

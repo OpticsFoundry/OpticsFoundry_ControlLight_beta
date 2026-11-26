@@ -21,7 +21,7 @@ void CS_ExecutionJumpTo(int command_line) {
     jump_line_number = command_line;
 }
 
-bool ExecutionRunning = true;
+bool ExecutionRunning = false;  //2026-11-26: was true before any execution
 
 
 int CS_GetNextCommandLineNumber(void) {
@@ -45,7 +45,10 @@ void PrintCommandLine(unsigned int line_nr) {
     xil_printf("%u: %s(", line_nr, command_defs[command_table[line_nr].opcode].name);
     for (int j = 0; j < command_defs[command_table[line_nr].opcode].arg_count; ++j) {
         xil_printf("R%u = ", command_table[line_nr].args[j]);
-        if (registers[command_table[line_nr].args[j]].type == REG_INT) {
+        if (command_table[line_nr].args[j] >= MAX_REGISTERS) {  //2026-11-26: bounds check
+            xil_printf("invalid register");
+        }
+        else if (registers[command_table[line_nr].args[j]].type == REG_INT) {
             PrintUnsignedLongLong(registers[command_table[line_nr].args[j]].value.i);
         }
         else if (registers[command_table[line_nr].args[j]].type == REG_DOUBLE) {
@@ -62,7 +65,15 @@ void PrintCommandLine(unsigned int line_nr) {
     xil_printf(")\n");
 }
 
+static CommandStatus ExecuteSequence(int check_ethernet_period_ms);
+
 CommandStatus CS_ExecuteSequence(int check_ethernet_period_ms) {
+    CommandStatus status = ExecuteSequence(check_ethernet_period_ms);
+    ExecutionRunning = false;  //2026-11-26: was never cleared, so later parse errors were reported as execution errors
+    return status;
+}
+
+static CommandStatus ExecuteSequence(int check_ethernet_period_ms) {
     const char* bad_label = NULL;
     if (!check_label_table(&bad_label)) {
         char buf[200];
@@ -89,8 +100,8 @@ CommandStatus CS_ExecuteSequence(int check_ethernet_period_ms) {
         }
         command_defs[command_table[next_line_number].opcode].func(command_table[next_line_number].args);
         if (Execution_jumped) {
-            if (jump_line_number >= command_count) {
-                CS_SetError(CMD_INVALID_LABEL, "Jump destination beyond end of code");
+            if ((jump_line_number < 0) || (jump_line_number >= command_count)) {  //2026-11-26: negative destinations executed memory before command_table
+                CS_SetError(CMD_INVALID_LABEL, "Jump destination outside of code");
                 return CMD_INVALID_LABEL;
             }
             next_line_number = jump_line_number;

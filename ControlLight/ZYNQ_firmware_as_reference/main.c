@@ -50,6 +50,8 @@
 #endif
 
 #include "FireflyControl.h"
+#include "firmware_update.h"
+#include "sequencer_identity.h"
 
 /* defined by each RAW mode application */
 void print_app_header();
@@ -154,8 +156,8 @@ void RunEventLoop() { //make sure other parts of the program regularly (at least
 
 /* the mac address of the board. this should be unique per board */
 /*
-To change MAC address:
-Change mac_ethernet_address, then rebuild as DEBUG and RELEASE, create firmware image, flash.
+Since 2026-11-26 the MAC address is computed at start-up from the unique ID of the QSPI flash,
+see sequencer_identity.h: 02:4F:46:xx:xx:xx. The value below is only used if the flash has no unique ID.
 */
 unsigned char mac_ethernet_address[] =
 	{ 0x00, 0x0a, 0x35, 0xF1, 0x01, 0x03 };
@@ -285,6 +287,12 @@ The complete list is shown in "MicroZed ethernet lwIP BSP working vs not working
 #endif
 #endif
 	print_app_header();
+
+	/* board specific MAC address, derived from the QSPI flash unique ID */
+	FirmwareUpdate_init();
+	SequencerIdentity_get_mac(mac_ethernet_address);
+	xil_printf("MAC address %02X:%02X:%02X:%02X:%02X:%02X\r\n", mac_ethernet_address[0], mac_ethernet_address[1],
+			mac_ethernet_address[2], mac_ethernet_address[3], mac_ethernet_address[4], mac_ethernet_address[5]);
 
 	lwip_init();
 

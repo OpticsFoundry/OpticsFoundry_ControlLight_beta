@@ -34,6 +34,7 @@ void CS_AssembleSequence(void) {
     command_count = 0;
     reset_label_table();
     reset_name_table();
+    CS_ResetConstants();  //2026-11-26: so that ContinueExecution is registers[MAX_USER_REGISTERS] again, and registers[] doesn't overflow
     CS_Reset_errors();
     CS_DefineVariables();
 }

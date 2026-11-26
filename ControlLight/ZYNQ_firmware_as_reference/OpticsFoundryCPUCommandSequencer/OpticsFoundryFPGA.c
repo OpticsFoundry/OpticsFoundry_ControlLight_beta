@@ -33,9 +33,9 @@ unsigned long OpticsFoundryFPGA_GetInputBufferValue(unsigned long buffer_pos) {
 		CS_SetError(CMD_INPUT_BUFFER_EMPTY, "GetInputBufferValue : Input buffer empty");
 		return 0;
 	}
-	if (buffer_pos > InputBufferContentsLength) {
+	if (buffer_pos >= InputBufferContentsLength / 4) {  //2026-11-26: InputBufferContentsLength is in bytes, buffer_pos in 32-bit words; was "> InputBufferContentsLength"
 		char buf[300];
-		sprintf(buf, "GetInputBufferValue(%lu); buffer contains only %lu values", buffer_pos, InputBufferContentsLength);
+		sprintf(buf, "GetInputBufferValue(%lu); buffer contains only %lu values", buffer_pos, (unsigned long)(InputBufferContentsLength / 4));
 		CS_SetError(CMD_INPUT_BUFFER_LOW, buf);
 		return 0;
 	}
@@ -65,7 +65,9 @@ unsigned long long OpticsFoundryFPGA_GetFPGABuffer(unsigned long long buffer_pos
 }
 
 void OpticsFoundryFPGA_SetAD9858Value(unsigned long long buffer_pos, long long value, unsigned int length_in_bytes) {
-	if (buffer_pos >= (Sequence_length_in_64bit_commands - length_in_bytes - 1)) {
+	//2026-11-26: the subtraction wrapped around for short sequences, allowing writes anywhere in memory
+	if (((unsigned long long)Sequence_length_in_64bit_commands < (unsigned long long)length_in_bytes + 1) ||
+		(buffer_pos >= ((unsigned long long)Sequence_length_in_64bit_commands - length_in_bytes - 1))) {
 		char buf[300];
 		sprintf(buf, "SetAD9858AmplitudeAtBufferPosition(%llu): sequence buffer contains only %lu values", buffer_pos, Sequence_length_in_64bit_commands);
 		CS_SetError(CMD_OUTPUT_BUFFER_LOW, buf);
@@ -118,7 +120,8 @@ void OpticsFoundryFPGA_SetAD9858ControlWordAtBufferPosition(unsigned long long b
 }
 
 void OpticsFoundryFPGA_SetAnalogOutAtBufferPosition(unsigned long long buffer_pos, long long value) {
-	if (buffer_pos >= (Sequence_length_in_64bit_commands - 7)) { //-7: 6 for 48bit frequency tuning word and 1 for stop command
+	//-7: 6 for 48bit frequency tuning word and 1 for stop command. 2026-11-26: the subtraction wrapped around for short sequences
+	if ((Sequence_length_in_64bit_commands < 7) || (buffer_pos >= ((unsigned long long)Sequence_length_in_64bit_commands - 7))) {
 		char buf[300];
 		sprintf(buf, "SetAnalogOutAtBufferPosition(%llu): sequence buffer contains only %lu values", buffer_pos, Sequence_length_in_64bit_commands);
 		CS_SetError(CMD_OUTPUT_BUFFER_LOW, buf);

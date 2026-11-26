@@ -45,6 +45,7 @@ int find_name_index(const char* name) {
 
 bool add_name(const char* name, int register_number) {
     if (name_table_count >= MAX_NAMES) return false;
+    if (strlen(name) >= MAX_NAME_LENGTH) return false;  //2026-11-26: was stored without terminating zero and then never found again
 
     int idx = find_name_index(name);
     if (idx != -1) {

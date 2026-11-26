@@ -53,6 +53,7 @@ extern int CS_GetCommandCount(void);
 //extern void RegisterAllCommands(void);
 CommandStatus CS_AddCommand(const char* command_str);
 extern void CS_AssembleSequence(void);
+extern void CS_ResetConstants(void);
 
 
 // Debug / control

@@ -41,8 +41,7 @@ static const char* parse_token(const char* s, char* out, size_t max_len) {
         ++s;
     }
     if (*s == ':') {
-        out[i] = ':';
-        i++;
+        if (i < max_len - 1) out[i++] = ':';  //2026-11-26: was written unconditionally (one byte overflow)
         ++s;
     }
     out[i] = '\0';
@@ -57,8 +56,7 @@ static const char* parse_one_argument(const char* s, char* out, size_t max_len) 
         ++s;
     }
     if (*s == ':') {
-        out[i] = ':';
-        i++;
+        if (i < max_len - 1) out[i++] = ':';  //2026-11-26: was written unconditionally (one byte overflow)
         ++s;
     }
     out[i] = '\0';
@@ -77,18 +75,32 @@ static const char* parse_label(const char* s, char* out, size_t max_len) {
     return s;
 }
 
+//Constants, labels and variable names are stored in registers[MAX_USER_REGISTERS...MAX_REGISTERS-1].
+//2026-11-26: const_index was a function static that was never reset and never bounds checked, so registers[]
+//overflowed after about 85 cs_assemble_sequence commands. It is now reset by CS_AssembleSequence.
+static int const_index = MAX_USER_REGISTERS;
+
+void CS_ResetConstants(void) {
+    const_index = MAX_USER_REGISTERS;
+}
+
+static bool constant_register_available(void) {
+    if (const_index < MAX_REGISTERS) return true;
+    CS_SetError(CMD_REGISTER_OVERFLOW, "Too many constants, labels and variable names");
+    return false;
+}
+
 static const char* parse_argument(const char* s, uint16_t* out_index) {
     s = skip_whitespace(s);
-    static int const_index = MAX_USER_REGISTERS;
     *out_index = 0;
 
     if (s[0] == '"') {
         // String literal
         s++;
-        //const char* start = arg;
+        if (!constant_register_available()) return NULL;
         char* dst = registers[const_index].value.s;
         size_t len = 0;
-        while (s && *s != '"') {
+        while (*s && *s != '"') {  //2026-11-26: was "while (s && ...)", which ran beyond the end of the string
             if (len < MAX_STRING_LENGTH - 1) {
                 dst[len++] = *s++;
             }
@@ -120,17 +132,18 @@ static const char* parse_argument(const char* s, uint16_t* out_index) {
         //s++;
         //char token[32];
         //parse_token(s, token, 32);
-        uint16_t index = (uint16_t)atoi(&arg[1]);
-        if (*out_index >= MAX_USER_REGISTERS) {
-            CS_SetError(CMD_STRING_TOO_LONG, "User register number too high");
+        long index = atol(&arg[1]);
+        if ((index < 0) || (index >= MAX_USER_REGISTERS)) {  //2026-11-26: checked *out_index (always 0) instead of index
+            CS_SetError(CMD_REGISTER_OVERFLOW, "User register number too high");
             return NULL;
         }
-        *out_index = index;
+        *out_index = (uint16_t)index;
         //while (isdigit(*s)) ++s;
         return s;
     }
     else if (strchr(arg, '.')) {
         // double
+        if (!constant_register_available()) return NULL;
         registers[const_index].type = REG_DOUBLE;
         registers[const_index].value.d = atof(arg);
         *out_index = const_index++;
@@ -141,9 +154,17 @@ static const char* parse_argument(const char* s, uint16_t* out_index) {
         // label
         char label[32];
         parse_label(arg, label, sizeof(label));
-        int label_index;
-        //bool ok =
-        add_label(label, &label_index, -1);
+        if (!constant_register_available()) return NULL;
+        //reference to a label: use the existing entry (label defined before, or referenced before),
+        //otherwise add it as not yet defined (line -1). 2026-11-26: the return value of add_label was ignored,
+        //leaving label_index uninitialized if the label table was full.
+        int label_index = find_label_index(label);
+        if (label_index < 0) {
+            if (!add_label(label, &label_index, -1)) {
+                CS_SetError(CMD_INVALID_LABEL, "Too many labels, or label name too long");
+                return NULL;
+            }
+        }
         registers[const_index].type = REG_INT;
         registers[const_index].value.i = label_index;
         *out_index = const_index++;
@@ -154,6 +175,7 @@ static const char* parse_argument(const char* s, uint16_t* out_index) {
         // name
         int name_index = find_name_index(arg);
         if (name_index < 0) {
+            if (!constant_register_available()) return NULL;
             if (!add_name(arg, const_index)) {
                 CS_SetError(CMD_STRING_TOO_LONG, "couldn't register variable name");
                 return NULL;
@@ -168,6 +190,7 @@ static const char* parse_argument(const char* s, uint16_t* out_index) {
     }
     else {
         // Int
+        if (!constant_register_available()) return NULL;
         registers[const_index].type = REG_INT;
         char* endPtr;
         long long value;
@@ -216,7 +239,10 @@ CommandStatus CS_AddCommand(const char* s) {
             const CommandDef* def = &command_defs[opcode];
 
             s = skip_whitespace(s);
-            if (*s != '(') return CMD_PARSE_ERROR;
+            if (*s != '(') {
+                CS_SetError(CMD_PARSE_ERROR, "Missing '('");
+                return CMD_PARSE_ERROR;
+            }
             ++s;
 
             uint16_t args[MAX_ARGUMENTS] = { 0 };

@@ -39,7 +39,11 @@ void CS_SetError(CommandStatus code, const char* message) {
 	//int code_line = -1;
 	if (CS_ExecutionIsRunning()) {
 		int code_line = CS_GetNextCommandLineNumber();
-		snprintf(error_messages[error_count++], 128, "Execution error %d in line %d: %s, command %s", code, code_line, message, command_defs[command_table[code_line].opcode].name);
+		//2026-11-26: bounds checks before using code_line and the opcode as table indices
+		const char* command_name = "?";
+		if ((code_line >= 0) && (code_line < command_count) && (command_table[code_line].opcode < num_commands))
+			command_name = command_defs[command_table[code_line].opcode].name;
+		snprintf(error_messages[error_count++], 128, "Execution error %d in line %d: %s, command %s", code, code_line, message, command_name);
 	} 
 	else
 		snprintf(error_messages[error_count++], 128, "Parsing error %d in line %d: %s", code, CS_GetCommandCount(), message);

@@ -26,8 +26,24 @@
  *
  */
 
+/*
+ * TCP command server of the sequencer.
+ *
+ * 2026-11-26 hardening:
+ * - only one client at a time: a new connection replaces the previous one
+ * - pbuf chains are processed completely (previously only the first pbuf of a chain was used)
+ * - command lines are split byte by byte with bounds checks; overlong lines and lines arriving
+ *   while the command ring buffer is full are dropped (previously off-by-one write, dropped
+ *   whole packets, and returned ERR_MEM after freeing the pbuf)
+ * - binary transfers never write beyond the destination buffer; if more data is announced than
+ *   fits, the excess is discarded and the transfer is marked as failed
+ * - the connection pointer is cleared when the connection closes or is reset, and all send
+ *   functions check it; server_send_binary can no longer loop forever on a dead connection
+ */
+
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 
 #include "lwip/tcp.h"
@@ -41,56 +57,56 @@
 #include "xtime_l.h"
 //typedef unsigned char bool;
 #include <stdbool.h>
+#include "sequencer_identity.h"
 
 extern bool DebugModeOn;
 extern void RunEventLoop(); //defined in main.c
 
+static u32 ElapsedMs(XTime start) {
+	XTime now;
+	XTime_GetTime(&now);
+	return (u32)((now - start) / (COUNTS_PER_SECOND / 1000));
+}
+
 u8 client_connected = 0;
 
 u8 is_client_connected() {
-	//if (DebugModeOn) xil_printf("icc ");
 	return client_connected;
 }
 
 int transfer_data() {
-	//if (DebugModeOn) xil_printf("transfer_data called ");
 	return 0;
 }
 
 void print_app_header()
 {
-#if (LWIP_IPV6==0)
-	{xil_printf("\n\r\n\r----- FireflyControl TCP server IP4 ------\n\r");}
-#else
-	{if (DebugModeOn) xil_printf("\n\r\n\r----- FireflyControl TCP server IP6 ------\n\r");}
-#endif
-	{xil_printf("listening on port 7\n\r");}
+	xil_printf("\n\r\n\r----- FireflyControl TCP server IP4 ------\n\r");
+	xil_printf("listening on TCP port %d, discovery on UDP port %d\n\r", SEQUENCER_TCP_PORT, SEQUENCER_DISCOVERY_UDP_PORT);
 }
 
-//command format: *command#
-#define MaxCommandBuffer 64  //ToDo: adjust to have enough space
-#define MaxCommandLength  128 //ToDo: adjust to have enough space, but not too much, as this is a fixed size buffer in PS RA
+//commands are lines of text, terminated by '\n'
+#define MaxCommandBuffer 64   //number of commands that can wait to be treated
+#define MaxCommandLength 128  //including terminating zero
 unsigned char CommandBuffer [MaxCommandBuffer*MaxCommandLength];
 
 u8 ReveiveMode = 0; //0: ASCII commands, 1: binary data into buffer
-u8 NextEmptyCommandBufferNumber = 0;
-u8 WritePositionInNextEmptyCommandBuffer = 0;
-u8 CommandStartDetected = 0;
-u8 NextCommandToDo = 0;
-u8 NumberCommandsInBuffer = 0;
-u8* BinaryBufferStart = NULL;
-u32 BinaryBufferLengthInBytes = 0;
-u32 BinaryBufferReceivedInBytes = 0;
-u32 BinaryBufferExpectedInBytes = 0;
-struct tcp_pcb *last_tpcb;
-u8 Digital_data_successfully_received = 0;
+static u32 NextEmptyCommandBufferNumber = 0;
+static u32 WritePositionInNextEmptyCommandBuffer = 0;
+static bool DiscardCurrentCommand = false;
+static u32 NextCommandToDo = 0;
+static u32 NumberCommandsInBuffer = 0;
+static u8* BinaryBufferStart = NULL;
+static u32 BinaryBufferLengthInBytes = 0;
+static u32 BinaryBufferReceivedInBytes = 0;
+static u32 BinaryBufferExpectedInBytes = 0;
+struct tcp_pcb *last_tpcb = NULL; //the connected client; NULL if there is none
+static u8 Digital_data_successfully_received = 0;
 
-void server_clear(u32* a_buffer, u32 a_length){
-	if (DebugModeOn) xil_printf("server_clear called ");
+static void ResetReceiveState(void) {
 	ReveiveMode = 0;
 	NextEmptyCommandBufferNumber = 0;
 	WritePositionInNextEmptyCommandBuffer = 0;
-	CommandStartDetected = 0;
+	DiscardCurrentCommand = false;
 	NextCommandToDo = 0;
 	NumberCommandsInBuffer = 0;
 	BinaryBufferStart = NULL;
@@ -98,6 +114,11 @@ void server_clear(u32* a_buffer, u32 a_length){
 	BinaryBufferReceivedInBytes = 0;
 	BinaryBufferExpectedInBytes = 0;
 	Digital_data_successfully_received = 0;
+}
+
+void server_clear(u32* a_buffer, u32 a_length){
+	if (DebugModeOn) xil_printf("server_clear called ");
+	ResetReceiveState();
 }
 
 void server_set_ascii_mode() {
@@ -114,19 +135,10 @@ unsigned char *server_get_command(long double timeout_in_seconds) {
     	long double wait_time_in_seconds = 0;
 		while ((NumberCommandsInBuffer == 0) && (wait_time_in_seconds < timeout_in_seconds)) {
 			RunEventLoop();
-			//if (NumberCommandsInBuffer == 0) { 
-				//sleep(0.001); 	//such a sleep should maybe be in FireflyControlLoop, as that code can decide if it can afford to sleep or needs to check on commands from PL to PS
-			//}
 			XTime_GetTime(&tEnd);
 			wait_time_in_seconds = (long double)((tEnd - tStart) *2)/(long double)XPAR_PS7_CORTEXA9_0_CPU_CLK_FREQ_HZ;
-			//float c = COUNTS_PER_SECOND;
-			//wait_time_in_seconds = 1.0 * (tEnd - tStart);
-			//wait_time_in_seconds /= c;
-		}	
+		}
 		if (!(wait_time_in_seconds < timeout_in_seconds)) {
-			//unsigned char buf[256];
-			//sprintf(buf, "server_get_command took %13.5lf sec, which is longer than allowed timeout of %13.5lf sec.\r\n",wait_time_in_seconds, timeout_in_seconds);
-			//if (DebugModeOn) xil_printf(buf);
 			if (ReveiveMode == 1) { //digital data expected
 				server_set_ascii_mode();
 				{if (DebugModeOn) xil_printf("Timeout during digital data transfer. Switching back to ASCII mode.\r\n");}
@@ -134,6 +146,7 @@ unsigned char *server_get_command(long double timeout_in_seconds) {
 		}
 		if (NumberCommandsInBuffer == 0) return NULL;
 	}
+	//The returned string stays valid until MaxCommandBuffer further commands have been received.
 	unsigned char * return_command = CommandBuffer + MaxCommandLength*NextCommandToDo;
 	NextCommandToDo++;
 	if (NextCommandToDo>=MaxCommandBuffer) NextCommandToDo = 0;
@@ -147,13 +160,13 @@ u32_t server_read_u32() {
 		if (DebugModeOn) xil_printf("server_read_u32 : no data received\r\n");
 		return 0;
 	}
-	return atoi((char*)u32_as_string);
+	return strtoul((char*)u32_as_string, NULL, 10);
 }
 
 u8_t server_read_u8() {
 	unsigned char *u8_as_string = server_get_command(/*timeout*/10.0);
 	if (u8_as_string == NULL) {
-		if (DebugModeOn) xil_printf("server_read_u32 : no data received\r\n");
+		if (DebugModeOn) xil_printf("server_read_u8 : no data received\r\n");
 		return 0;
 	}
 	return atoi((char*)u8_as_string);
@@ -167,20 +180,6 @@ double server_read_double() {
 	}
 	return atof((char*)double_as_string);
 }
-
-/*unsigned char *server_get_command(int timeout) {
-	if (NumberCommandsInBuffer == 0) {
-		if (timeout>0){
-			while (NumberCommandsInBuffer == 0) RunEventLoop();//ToDo: implement timeout
-			if (NumberCommandsInBuffer == 0) return NULL;
-		} else return NULL;
-	}
-	unsigned char * return_command = CommandBuffer + MaxCommandLength*NextCommandToDo;
-	NextCommandToDo++;
-	if (NextCommandToDo>=MaxCommandBuffer) NextCommandToDo = 0;
-	NumberCommandsInBuffer--;
-	return return_command;
-}*/
 
 //ToDo: use one of the following two commands to check if digital data transfer was successful before doing anything with that data
 u8 server_last_digital_data_transfer_successful() {
@@ -204,112 +203,125 @@ bool server_wait_till_digital_tranfer_done() {
 	return true;
 }
 
+/* binary mode: copy data into the binary buffer; returns the number of bytes consumed */
+static u32 ProcessBinaryData(const u8* data, u32 length) {
+	u32 to_read = BinaryBufferExpectedInBytes - BinaryBufferReceivedInBytes;
+	if (to_read > length) to_read = length;
+	if (BinaryBufferReceivedInBytes < BinaryBufferLengthInBytes) {  /* never write beyond the buffer */
+		u32 fits = BinaryBufferLengthInBytes - BinaryBufferReceivedInBytes;
+		memcpy(BinaryBufferStart + BinaryBufferReceivedInBytes, data, (to_read < fits) ? to_read : fits);
+	}
+	BinaryBufferReceivedInBytes += to_read;
+	if (BinaryBufferReceivedInBytes >= BinaryBufferExpectedInBytes) {
+		ReveiveMode = 0; //switch back to ascii mode
+		if (BinaryBufferExpectedInBytes <= BinaryBufferLengthInBytes) {
+			Digital_data_successfully_received = 1;
+		} else {
+			Digital_data_successfully_received = 0;
+			xil_printf("server : binary data (%lu bytes) didn't fit into buffer (%lu bytes); excess discarded, transfer failed\r\n",
+					(unsigned long)BinaryBufferExpectedInBytes, (unsigned long)BinaryBufferLengthInBytes);
+		}
+	}
+	return to_read;
+}
+
+extern void CS_StopExecution(void);      /* OpticsFoundryCPUCommandSequencer */
+extern void CS_InterruptExecution(void);
+
+/* Commands that must act while a CPU command sequence is executing. FireflyControlLoop doesn't dispatch
+ * commands then, so previously a running CPU command sequence couldn't be stopped. These commands are
+ * also queued normally; executing them a second time is harmless. */
+static void HandleUrgentCommand(const char* command) {
+	if ((strcmp(command, "cs_stop_sequence") == 0) || (strcmp(command, "cs_stop_sequence0") == 0)) CS_StopExecution();
+	else if ((strcmp(command, "cs_interrupt_sequence") == 0) || (strcmp(command, "cs_interrupt_sequence0") == 0)) CS_InterruptExecution();
+}
+
+/* ASCII mode: split data into '\n' terminated commands */
+static void ProcessAsciiData(const u8* data, u32 length) {
+	for (u32 n = 0; n < length; n++) {
+		u8 c = data[n];
+		if (c == '\n') {
+			if (DiscardCurrentCommand) {
+				xil_printf("server : command dropped (longer than %d characters, or more than %d untreated commands)\r\n", MaxCommandLength - 1, MaxCommandBuffer);
+			} else {
+				CommandBuffer[NextEmptyCommandBufferNumber*MaxCommandLength + WritePositionInNextEmptyCommandBuffer] = 0; //terminate string with 0
+				if (DebugModeOn) xil_printf("server_recv_callback: received %s\r\n",(char *)(&(CommandBuffer[NextEmptyCommandBufferNumber*MaxCommandLength])));
+				HandleUrgentCommand((const char *)(&(CommandBuffer[NextEmptyCommandBufferNumber*MaxCommandLength])));
+				NumberCommandsInBuffer++;
+				NextEmptyCommandBufferNumber++;
+				if (NextEmptyCommandBufferNumber >= MaxCommandBuffer) NextEmptyCommandBufferNumber = 0;
+			}
+			WritePositionInNextEmptyCommandBuffer = 0;
+			DiscardCurrentCommand = false;
+		} else if (c != '\r') {
+			if (NumberCommandsInBuffer >= MaxCommandBuffer) {
+				DiscardCurrentCommand = true;  /* the slot to write to still holds an untreated command */
+			} else if (WritePositionInNextEmptyCommandBuffer >= (MaxCommandLength - 1)) {
+				DiscardCurrentCommand = true;  /* no space for the terminating zero */
+			} else if (!DiscardCurrentCommand) {
+				CommandBuffer[NextEmptyCommandBufferNumber*MaxCommandLength + WritePositionInNextEmptyCommandBuffer] = c;
+				WritePositionInNextEmptyCommandBuffer++;
+			}
+		}
+	}
+}
+
+static void ForgetConnection(struct tcp_pcb *tpcb) {
+	if (tpcb == last_tpcb) {
+		last_tpcb = NULL;
+		client_connected = 0;
+	}
+}
+
+static void error_callback(void *arg, err_t err) {
+	/* the pcb has already been freed by lwIP */
+	if (DebugModeOn) xil_printf("\r\nTCP connection reset (%d)\r\n", err);
+	ForgetConnection((struct tcp_pcb *)arg);
+}
+
+static err_t CloseConnection(struct tcp_pcb *tpcb) {
+	ForgetConnection(tpcb);
+	tcp_arg(tpcb, NULL);
+	tcp_recv(tpcb, NULL);
+	tcp_err(tpcb, NULL);
+	if (tcp_close(tpcb) != ERR_OK) {
+		tcp_abort(tpcb);
+		return ERR_ABRT;
+	}
+	return ERR_OK;
+}
+
 err_t recv_callback(void *arg, struct tcp_pcb *tpcb,
                                struct pbuf *p, err_t err)
 {
-	/* do not read the packet if we are not in ESTABLISHED state */
-	last_tpcb = tpcb;
 	if (DebugModeOn) xil_printf("r ");
-	if (!p) {
+	if (!p) { /* remote side closed the connection */
 		if (DebugModeOn) xil_printf("\r\nTCP disconnected\r\n");
-		client_connected = 0;
-		tcp_close(tpcb);
-		tcp_recv(tpcb, NULL);
+		return CloseConnection(tpcb);
+	}
+
+	/* indicate that the data has been received */
+	tcp_recved(tpcb, p->tot_len);
+
+	if ((err != ERR_OK) || (tpcb != last_tpcb)) { /* data of a connection that has been replaced */
+		pbuf_free(p);
 		return ERR_OK;
 	}
 
-	/* indicate that the packet has been received */
-	tcp_recved(tpcb, p->len);
-
-		//original code from echo server example
-		/* echo back the payload */
-		/* in this case, we assume that the payload is < TCP_SND_BUF */
-		/*if (tcp_sndbuf(tpcb) > p->len) {
-			err = tcp_write(tpcb, p->payload, p->len, 1);
-		} else
-			if (DebugModeOn) xil_printf("no space in tcp_sndbuf\n\r");*/
-
-	u32 plen = p->len;
-
-	if (ReveiveMode == 1) {  // binary mode
-		if (DebugModeOn) xil_printf("server_recv_callback : binary receive %d \r\n", plen);
-		if (BinaryBufferStart == NULL){
-			if (DebugModeOn) xil_printf("server_recv_callback : no binary buffer set\r\n");
-			pbuf_free(p);
-			return ERR_MEM;
-		}
-		u32 ToRead = plen;
-		if ((ToRead + BinaryBufferReceivedInBytes) > BinaryBufferExpectedInBytes)
-			ToRead = BinaryBufferExpectedInBytes - BinaryBufferReceivedInBytes;
-		for (u32 n = 0; n<ToRead; n++) {
-			BinaryBufferStart[BinaryBufferReceivedInBytes] = ((u8*)p->payload)[n];
-			BinaryBufferReceivedInBytes++;
-		}
-		
-		if (BinaryBufferReceivedInBytes == BinaryBufferExpectedInBytes) {
-			ReveiveMode = 0; //switch back to ascii mode
-			Digital_data_successfully_received = 1;
-		}
-
-		if (ToRead < plen) { //if any data left in input buffer, put it at correct place for ascii mode decoder below
-			u32 c = 0;
-			for (u32 n = ToRead; n<p->len; n++) {
-				((u8*)p->payload)[c] = ((u8*)p->payload)[n];
-				c++;
-			}
-			plen = plen - ToRead;   //this assures that ascii mode decoder uses only correct number of bytes
-		} else plen = 0;
-
-	}
-
-	if (ReveiveMode == 0) {  //ASCII mode
-		if (DebugModeOn) xil_printf("server_recv_callback : ASCII receive %d \r\n", plen);
-		if (plen > (MaxCommandLength - 1 - WritePositionInNextEmptyCommandBuffer)) {
-			if (DebugModeOn) xil_printf("server_recv_callback : command too long for command buffer (received len = %d > %d, nextCmd= %d )\r\n", WritePositionInNextEmptyCommandBuffer + plen, MaxCommandLength - 1, NextEmptyCommandBufferNumber );
-			//if (DebugModeOn) {
-			//	if (plen<100) {
-			//		((u8*)p->payload)[plen-1] = 0; 
-			//		xil_printf("received = %s\r\n",((u8*)p->payload));
-			//	}
-			//}
-			pbuf_free(p);
-			WritePositionInNextEmptyCommandBuffer = 0;
-			return ERR_OK; //we just eat the bad data and hope for better times. If we would send ERR_MEM back, we would just repeatedly be presented with same bad data
-		}
-		if (plen>0) CommandStartDetected = 1;
-		for (u8 n = 0; n<plen ; n++) {
-			//if (((u8*)p->payload)[n] == '*') {
-				//CommandStartDetected = 1;
-			//} else
-			if (((u8*)p->payload)[n] == '\n') {
-				CommandStartDetected = 0;
-				//if (WritePositionInNextEmptyCommandBuffer > 0) { //the user might send an empty string by purpose
-				if (DebugModeOn) xil_printf("server_recv_callback : ASCII stored, length %d \r\n", WritePositionInNextEmptyCommandBuffer);
-				CommandBuffer[NextEmptyCommandBufferNumber*MaxCommandLength + WritePositionInNextEmptyCommandBuffer] = 0; //terminate string with 0
-				NumberCommandsInBuffer++;
-				if (DebugModeOn) xil_printf("server_recv_callback: received %s\r\n",(char *)(&(CommandBuffer[NextEmptyCommandBufferNumber*MaxCommandLength])));
-				NextEmptyCommandBufferNumber++;
-				if (NextCommandToDo == NextEmptyCommandBufferNumber) {
-					if (DebugModeOn) xil_printf("server_recv_callback : too many untreated commands in command buffer\r\n");
-					pbuf_free(p);
-					//return ERR_OK; //we just eat the bad data and hope for better times. If we would send ERR_MEM back, we would just repeatedly be presented with same bad data
-					return ERR_MEM; //we keep the data in buffer, i.e. we'll get it again, hopefully after some commands have been treated and there is space in buffer
-				}
-				if (NextEmptyCommandBufferNumber >= MaxCommandBuffer){
-					NextEmptyCommandBufferNumber = 0;
-				}
-				WritePositionInNextEmptyCommandBuffer = 0;
-				if (n<(plen-1)) CommandStartDetected = 1;
-				//}
-			} else if (CommandStartDetected) {
-				if (((u8*)p->payload)[n] != '\r') {
-					CommandBuffer[NextEmptyCommandBufferNumber*MaxCommandLength + WritePositionInNextEmptyCommandBuffer] = ((u8*)p->payload)[n];
-					WritePositionInNextEmptyCommandBuffer++;
-					if (WritePositionInNextEmptyCommandBuffer > MaxCommandLength) {
-						if (DebugModeOn) xil_printf("server_recv_callback : command exceeds maximum length without new line character. Clipping beginning of command.\r\n");
-						WritePositionInNextEmptyCommandBuffer = 0;
-					}
-				}
+	for (struct pbuf *q = p; q != NULL; q = q->next) {
+		const u8* data = (const u8*)q->payload;
+		u32 length = q->len;
+		while (length > 0) {
+			if (ReveiveMode == 1) {
+				if (DebugModeOn) xil_printf("server_recv_callback : binary receive %d \r\n", length);
+				u32 used = ProcessBinaryData(data, length);
+				if (used == 0) ReveiveMode = 0;  /* can't happen; avoids an endless loop */
+				data += used;
+				length -= used;
+			} else {
+				if (DebugModeOn) xil_printf("server_recv_callback : ASCII receive %d \r\n", length);
+				ProcessAsciiData(data, length);
+				length = 0;
 			}
 		}
 	}
@@ -320,17 +332,26 @@ err_t recv_callback(void *arg, struct tcp_pcb *tpcb,
 	return ERR_OK;
 }
 
-err_t server_send_ascii(char* buf) { //if *command# structure is needed, I assume calling function has added * and #
+err_t server_send_ascii(char* buf) {
 	size_t plen = strlen(buf);
-	//send it to last client from which we received data
-	if (tcp_sndbuf(last_tpcb) > plen) {
-		err_t err = tcp_write(last_tpcb, buf, plen, 1);
-		if (DebugModeOn) xil_printf("server_send_ascii: sending %s\r\n",buf);
-		return err;
-	} else {
-		if (DebugModeOn) xil_printf("server_send_ascii: no space in tcp_sndbuf\n\r");
-		return ERR_MEM;
+	if (last_tpcb == NULL) {
+		if (DebugModeOn) xil_printf("server_send_ascii: no client connected\n\r");
+		return ERR_CONN;
 	}
+	XTime start;
+	XTime_GetTime(&start);
+	while (tcp_sndbuf(last_tpcb) < plen) { /* wait (at most 1 s) for space in the send buffer */
+		tcp_output(last_tpcb);
+		RunEventLoop();
+		if (last_tpcb == NULL) return ERR_CONN;
+		if (ElapsedMs(start) > 1000) {
+			xil_printf("server_send_ascii: no space in tcp_sndbuf\n\r");
+			return ERR_MEM;
+		}
+	}
+	err_t err = tcp_write(last_tpcb, buf, plen, TCP_WRITE_FLAG_COPY);
+	if (DebugModeOn) xil_printf("server_send_ascii: sending %s\r\n",buf);
+	return err;
 }
 
 void server_write_u32(u32_t a_u32) {
@@ -340,59 +361,66 @@ void server_write_u32(u32_t a_u32) {
 	if (DebugModeOn) xil_printf("server_write_u32 : wrote %lu\r\n", a_u32);
 }
 
-err_t server_send_binary(char* buf, u32 length, bool DebugModeOn) { //if *command# structure is needed, I assume calling function has added * and #
-	//size_t plen = length;
-	//send it to last client from which we received data
-	/*if (tcp_sndbuf(last_tpcb) > plen) {
-		err_t err = tcp_write(last_tpcb, buf, plen, 1);
-		//if (DebugModeOn) xil_printf("server_send_binary: sending %s\r\n",buf);
-		return err;
-	} else {
-		if (DebugModeOn) xil_printf("server_send_binary: no space in tcp_sndbuf\n\r");
-		return ERR_MEM;
-	}*/
-	//if length > tcp_sndbuf(last_tpcb) we need to split the data into multiple packets
+err_t server_send_binary(char* buf, u32 length, bool DebugModeOn) {
+	//data longer than the send buffer is sent in several parts
 	if (DebugModeOn) xil_printf("server_send_binary: need to send %u bytes\r\n",length);
-	if (length == 0) return ERR_OK;
 	u32 n = 0;
-	err_t err;
+	XTime last_progress;
+	XTime_GetTime(&last_progress);
 	while (n < length) {
-		u32 free_buf = tcp_sndbuf(last_tpcb); // get available buffer space for sending (in bytes). 
-		if (free_buf > (length - n)) {
-			if (DebugModeOn) xil_printf("server_send_binary: sending last %u bytes\r\n",length - n);
-			err = tcp_write(last_tpcb, buf + n, length - n, 1);
-			return err;
-		} else if (free_buf > 0) {
-			if (DebugModeOn) xil_printf("server_send_binary: sending %u bytes\r\n",free_buf);
-			err = tcp_write(last_tpcb, buf + n, free_buf, 1);
-			n += free_buf;
-			if (err != ERR_OK) {
-				if (DebugModeOn) xil_printf("server_send_binary: no space in tcp_sndbuf\n\r");
-				return ERR_MEM;
+		if (last_tpcb == NULL) {
+			if (DebugModeOn) xil_printf("server_send_binary: connection closed\n\r");
+			return ERR_CONN;
+		}
+		u32 free_buf = tcp_sndbuf(last_tpcb); // available buffer space for sending (in bytes).
+		if (free_buf > 0) {
+			u32 chunk = ((length - n) < free_buf) ? (length - n) : free_buf;
+			if (chunk > 0xFFFF) chunk = 0xFFFF;
+			err_t err = tcp_write(last_tpcb, buf + n, (u16_t)chunk, TCP_WRITE_FLAG_COPY);
+			if (err == ERR_OK) {
+				if (DebugModeOn) xil_printf("server_send_binary: sending %u bytes\r\n", chunk);
+				n += chunk;
+				XTime_GetTime(&last_progress);
+			} else if (err != ERR_MEM) {
+				if (DebugModeOn) xil_printf("server_send_binary: tcp_write error %d\n\r", err);
+				return err;
 			}
 		}
 		//invoke communication to send the data
-		err = tcp_output(last_tpcb);
+		err_t err = tcp_output(last_tpcb);
 		if (err != ERR_OK) {
 			if (DebugModeOn) xil_printf("server_send_binary: could not send\n\r");
-			return ERR_MEM;
+			return err;
 		}
-		RunEventLoop();
+		if (n < length) {
+			RunEventLoop();
+			if (ElapsedMs(last_progress) > 5000) {
+				xil_printf("server_send_binary: timeout, %lu of %lu bytes sent\n\r", (unsigned long)n, (unsigned long)length);
+				return ERR_TIMEOUT;
+			}
+		}
 	}
-	return err;
+	return ERR_OK;
 }
 
 void server_set_binary_mode(u8* a_buffer, u32 a_length, u32 a_expected_length) {
 	if (DebugModeOn) xil_printf("server_set_binary_mode : expecting %d bytes\r\n", a_expected_length);
 	BinaryBufferStart = a_buffer;
-	BinaryBufferLengthInBytes = a_length;
+	BinaryBufferLengthInBytes = (a_buffer != NULL) ? a_length : 0;
 	BinaryBufferReceivedInBytes = 0;
 	BinaryBufferExpectedInBytes = a_expected_length; //switch back to ascii mode once this number of bytes has been received
-	if (BinaryBufferExpectedInBytes > BinaryBufferLengthInBytes) {
-		if (DebugModeOn) xil_printf("server_set_binary_mode : buffer size (%d) not big enough for expected binary data size (%d)\n\r", BinaryBufferLengthInBytes, BinaryBufferExpectedInBytes);
-	}
-	ReveiveMode = 1;
 	Digital_data_successfully_received = 0;
+	if (BinaryBufferExpectedInBytes > BinaryBufferLengthInBytes) {
+		/* stay in sync with the sender, but discard the excess data and report failure */
+		xil_printf("server_set_binary_mode : buffer size (%lu) not big enough for expected binary data size (%lu); data will be discarded\n\r",
+				(unsigned long)BinaryBufferLengthInBytes, (unsigned long)BinaryBufferExpectedInBytes);
+	}
+	if (BinaryBufferExpectedInBytes == 0) {
+		ReveiveMode = 0;
+		Digital_data_successfully_received = 1;
+	} else {
+		ReveiveMode = 1;
+	}
 	server_send_ascii("Ready\n"); //This Ready should be needed to avoid receiving binary data in ASCII mode. However, it works without and it doesn't work if I put it. FS 2025 04 02
 }
 
@@ -406,16 +434,21 @@ int get_connection_number() {
 // accept_callback is called when a new client connects to this TCP server
 err_t accept_callback(void *arg, struct tcp_pcb *newpcb, err_t err)
 {
-
+	if ((err != ERR_OK) || (newpcb == NULL)) return ERR_VAL;
 	if (DebugModeOn) xil_printf("\r\nNew TCP client connected\r\n");
-	/* set the receive callback for this connection */
+	if (last_tpcb != NULL) {
+		/* only one client at a time: the new connection replaces the previous one */
+		xil_printf("\r\nTCP: new client connected, closing the previous connection\r\n");
+		CloseConnection(last_tpcb);
+	}
+	ResetReceiveState();
+	last_tpcb = newpcb;
+
+	/* the pcb is the callback argument, so that the error callback knows which connection failed */
+	tcp_arg(newpcb, newpcb);
 	tcp_recv(newpcb, recv_callback);
+	tcp_err(newpcb, error_callback);
 
-	/* just use an integer number indicating the connection id as the
-	   callback argument */
-	tcp_arg(newpcb, (void*)(UINTPTR)echo_connection);
-
-	/* increment for subsequent accepted connections */
 	echo_connection++;
 	client_connected = 1;
 
@@ -427,19 +460,19 @@ int start_application()
 {
 	struct tcp_pcb *pcb;
 	err_t err;
-	unsigned port = 57978;
+	unsigned port = SEQUENCER_TCP_PORT;
 
 	/* create new TCP PCB structure */
 	pcb = tcp_new_ip_type(IPADDR_TYPE_ANY);
 	if (!pcb) {
-		if (DebugModeOn) xil_printf("Error creating PCB. Out of Memory\n\r");
+		xil_printf("Error creating PCB. Out of Memory\n\r");
 		return -1;
 	}
 
 	/* bind to specified @port */
 	err = tcp_bind(pcb, IP_ANY_TYPE, port);
 	if (err != ERR_OK) {
-		if (DebugModeOn) xil_printf("Unable to bind to port %d: err = %d\n\r", port, err);
+		xil_printf("Unable to bind to port %d: err = %d\n\r", port, err);
 		return -2;
 	}
 
@@ -449,7 +482,7 @@ int start_application()
 	/* listen for connections */
 	pcb = tcp_listen(pcb);
 	if (!pcb) {
-		if (DebugModeOn) xil_printf("Out of memory while tcp_listen\n\r");
+		xil_printf("Out of memory while tcp_listen\n\r");
 		return -3;
 	}
 
@@ -458,8 +491,8 @@ int start_application()
 
 	if (DebugModeOn) xil_printf("TCP echo server started @ port %d\n\r", port);
 
-	if (DebugModeOn) xil_printf("enter \"help\" for help\r\n");
-
+	/* answer discovery requests (UDP) */
+	SequencerIdentity_start_discovery();
 
 	return 0;
 }

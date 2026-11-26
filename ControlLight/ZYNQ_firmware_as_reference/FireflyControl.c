@@ -535,7 +535,7 @@ u32 GetPLtoPSCommand(bool read_from_last_status) {
 }
 
 u32 ReadLatchedSequenceAddress() {
-	return XGpio_DiscreteRead(&axi_gpio_core_status_0, 1) && 0xFFFF;
+	return XGpio_DiscreteRead(&axi_gpio_core_status_0, 1) & 0xFFFF;  //2026-11-26: was "&& 0xFFFF", which returned 0 or 1
 }
 
 u32 ReadLatchedExtendedAddress() {
@@ -914,6 +914,14 @@ bool CheckInputMemBufferReadout(bool FinalTransfer) {
 		Dma1Cmd.BD.SrcAddr = (u32)(BRAM_input_buffer + ((read_high_buffer) ? (DMA1TransferSize_in_bytes/4) : 0));
 		Dma1Cmd.BD.DstAddr = (u32)(DDR_input_buffer + NextDMA1Transfer * (DMA1TransferSize_in_bytes/4));  // in 32-bit addresses
 		Dma1Cmd.BD.Length = DMA1TransferSize_in_bytes;
+	}
+
+	//2026-11-26: the check further below used InputBufferPosition, which is always 0, so it never triggered and
+	//long acquisitions wrote beyond the DDR input buffer (into the modify buffer and beyond the end of DDR)
+	if (((NextDMA1Transfer * DMA1TransferSize_in_bytes) + Dma1Cmd.BD.Length > DDR_INPUT_BUFFER_LENGTH_IN_BYTES) ||
+		(InputBufferContentsLength + Dma1Cmd.BD.Length > DDR_INPUT_BUFFER_LENGTH_IN_BYTES)) {
+		xil_printf("\r\nCheckInputMemBufferReadout: DDR input buffer full, input data discarded\r\n");
+		return FALSE;
 	}
 
 	InputBufferContentsLength += Dma1Cmd.BD.Length;
@@ -1530,10 +1538,17 @@ void FireflyControl_print_sequence(u32 print_length) {
 	}
 }
 
+static double FireflyControl_elapsed_seconds(XTime tStart);
+
 void FireflyControl_RunFastVCOLoop(unsigned long start_buffer_pos, unsigned long AD9854_frequency_buffer_pos) {
 	if (DebugModeOn) xil_printf("FireflyControl_RunFastVCOLoop start_buffer_pos = %lu, AD9854_frequency_buffer_pos = %lu\r\n", start_buffer_pos, AD9854_frequency_buffer_pos);
 	//For the moment this is just a speed test. How fast could we make the DDS VCO loop?
-	
+
+	//2026-11-26: start_buffer_pos wasn't checked, so any memory could be copied into the sequence BRAM
+	if (((unsigned long long)start_buffer_pos + 6) > Sequence_length_in_64bit_commands) {
+		xil_printf("FireflyControl_RunFastVCOLoop: start_buffer_pos %lu beyond end of sequence\r\n", start_buffer_pos);
+		return;
+	}
 	u32 SrcAddrOutBuf = (u32)(source + start_buffer_pos*2);  //start_buffer_pos is in 64 bit commands, SrcAddrOutBuf in 32-bit addresses
 	const u32 DstAddrOutBuf = (u32)(destination);
 	const u32 LengthOutBuf = 6*8; //AD9854 frequency tuning word = 48bits; /8 = 6x 64-bit commands, but only high buffer needs to be rewritten, the low buffer stays the same.
@@ -1563,8 +1578,16 @@ void FireflyControl_RunFastVCOLoop(unsigned long start_buffer_pos, unsigned long
 		//while sequence is running, determine the next frequency tuning word
 		long long value = destination[0]*10 + 10; //ToDo: correct equation to calculate the frequency tuning word 
 		OpticsFoundryFPGA_SetAD9858FrequencyAtBufferPosition(AD9854_frequency_buffer_pos, value);
-		//wait till sequence is finished
-		while (GetRunning(/*ReadFromLast*/ FALSE)) {}
+		//wait till sequence is finished (2026-11-26: with timeout)
+		XTime tSequenceStart;
+		XTime_GetTime(&tSequenceStart);
+		while (GetRunning(/*ReadFromLast*/ FALSE)) {
+			if (FireflyControl_elapsed_seconds(tSequenceStart) > 1.0) {
+				xil_printf("FireflyControl_RunFastVCOLoop: sequence didn't end within 1 s, loop stopped\r\n");
+				StopSequenceOnError(12);
+				return;
+			}
+		}
 		Sequence_running = false;
 		//Copy new frequency tuning word from DRAM to BRAM
 		//only high buffer needs to be rewritten, the low buffer stays the same.
@@ -1600,8 +1623,8 @@ void FireflyControl_get_current_waveform_point() {
 	u64 ElapsedClockCycles = ReadClockCyclesThisRun();//ReadLatchedWaitCycles() - StartWaitCycles;
 //	u32 address = ReadLatchedExtendedAddress();
 	bool running = GetRunning(/*ReadFromLast*/ FALSE);
-	char buf[20];
-	sprintf(buf, "%llu\n",ElapsedClockCycles);
+	char buf[32];  //2026-11-26: was 20, too small for a 64-bit number
+	snprintf(buf, sizeof(buf), "%llu\n",ElapsedClockCycles);
 	server_send_ascii(buf); //ToDo: send current sequence time, not point
 	server_send_ascii((running) ? "1\n" : "0\n");
 //	if (DebugModeOn) xil_printf("Elapsed cycles %d\r\n", ElapsedClockCycles);
@@ -2127,7 +2150,7 @@ void FireflyControl_transmit_I2C() {
 	u8 I2C_destination = server_read_u8();
 	u8 I2C_address = server_read_u8();
 	u32 I2C_clock_frequency_in_Hz = server_read_u32();
-	if (I2C_clock_frequency_in_Hz > 1000000) I2C_clock_frequency_in_Hz = 100000;
+	if ((I2C_clock_frequency_in_Hz == 0) || (I2C_clock_frequency_in_Hz > 1000000)) I2C_clock_frequency_in_Hz = 100000; //2026-11-26: 0 made the BSP assert hang the firmware
 	u32 number_bytes_to_send = server_read_u32();
 	u32 number_bytes_to_read = server_read_u32();
 	if (number_bytes_to_read > I2C_MAX_DATA_SIZE_IN_BYTES) {
@@ -2307,7 +2330,8 @@ void FireflyControlLoop() {
 	if (DebugModeOn) xil_printf("l ");
 	char * command = (char*)server_get_command(/*timeout*/10.0);
 	if (command) {
-		if (command[strlen(command)-1] != '0') { //ending a command with the character '0' suppresses the answer "Ready\n", which makes fine grained communication speedup possible.
+		size_t command_length = strlen(command);
+		if ((command_length == 0) || (command[command_length-1] != '0')) { //ending a command with the character '0' suppresses the answer "Ready\n", which makes fine grained communication speedup possible. 2026-11-26: empty line read command[-1]
 			server_send_ascii("Ready\n"); //confirm receipt of command
 		} else {
 			command[strlen(command)-1] = 0; //if the command ends in the character '0', we don't send out "Ready\n" and we remove the '0'.
@@ -2336,12 +2360,15 @@ void FireflyControlLoop() {
 			CS_AssembleSequence();
 		} else if (strcmp(command,"cs_add_command") == 0) {
 			char * command = (char*)server_get_command(/*timeout*/10.0);
-			CS_AddCommand(command);
-		} else if (strcmp(command,"cs_execute_sequence") == 0) {			
+			if (command) CS_AddCommand(command); //2026-11-26: NULL (timeout) wasn't checked
+			else xil_printf("cs_add_command: no command received\r\n");
+		} else if (strcmp(command,"cs_execute_sequence") == 0) {
 			char * s_ethernet_check_period = (char*)server_get_command(/*timeout*/10.0);
-			unsigned int ethernet_check_period = atoi(s_ethernet_check_period);
-			//CommandStatus status =
-			CS_ExecuteSequence(ethernet_check_period);
+			if (s_ethernet_check_period) { //2026-11-26: NULL (timeout) wasn't checked
+				unsigned int ethernet_check_period = atoi(s_ethernet_check_period);
+				//CommandStatus status =
+				CS_ExecuteSequence(ethernet_check_period);
+			} else xil_printf("cs_execute_sequence: no ethernet check period received\r\n");
 		} else if (strcmp(command,"cs_get_error_message") == 0) {	
 			CS_SendErrorMessages();
 		} else if (strcmp(command,"cs_stop_sequence") == 0) {	
@@ -2437,7 +2464,11 @@ void FireflyControlLoop() {
 			FirmwareUpdate_send_firmware_info();
 		} else if (strcmp(command,"update_firmware_qspi") == 0) {
 			//the modify buffer is only used transiently by modify_sequence, so the loaded sequence stays intact
-			FirmwareUpdate_update_qspi((u8*)(DDR_MODIFY_BUFFER_START), DDR_MODIFY_BUFFER_LENGTH_IN_BYTES, Sequence_running);
+			FirmwareUpdate_update_qspi((u8*)(DDR_MODIFY_BUFFER_START), DDR_MODIFY_BUFFER_LENGTH_IN_BYTES, Sequence_running, /*backup_image*/ false);
+		} else if (strcmp(command,"update_backup_firmware_qspi") == 0) {
+			FirmwareUpdate_update_qspi((u8*)(DDR_MODIFY_BUFFER_START), DDR_MODIFY_BUFFER_LENGTH_IN_BYTES, Sequence_running, /*backup_image*/ true);
+		} else if (strcmp(command,"test_backup_boot") == 0) {
+			FirmwareUpdate_test_backup_boot(Sequence_running);
 		} else if (strcmp(command,"reboot_system") == 0) {
 			FirmwareUpdate_reboot();
 		} else

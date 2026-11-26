@@ -47,16 +47,17 @@ int find_label_index(const char* label) {
 }
 
 bool add_label(const char* label, int *idx, int line_number) {
-    if (label_table_count >= MAX_LABELS) return false;
-
     *idx = find_label_index(label);
-    if (*idx != -1 && label_table[*idx].line_number >= 0) { 
+    if (*idx != -1 && label_table[*idx].line_number >= 0) {
         //add_error("Label already defined: ");
         //add_error(label);
         return false;
     }
 
     if (*idx == -1) {
+        //2026-11-26: table full check only for new labels; reject names that don't fit (were stored without terminating zero)
+        if (label_table_count >= MAX_LABELS) return false;
+        if (strlen(label) >= MAX_LABEL_LENGTH) return false;
         strncpy(label_table[label_table_count].name, label, MAX_LABEL_LENGTH);
         label_table[label_table_count].line_number = line_number;
         *idx = label_table_count;
@@ -75,6 +76,6 @@ int get_label_line(const char* label) {
 }
 
 int get_label_table_line_number(const int index) {
-    if (index >= label_table_count) return -1;
+    if ((index < 0) || (index >= label_table_count)) return -1;
     return label_table[index].line_number;
 }

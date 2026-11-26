@@ -201,7 +201,7 @@ DEFINE_MATH(cmd_tanh, tanh)
 
 #define DEFINE_MATH2(name, op) \
 void name(uint16_t* args) { \
-    Register* dst = REG(0), * a = REG(1), * b = REG(1); \
+    Register* dst = REG(0), * a = REG(1), * b = REG(2); /* 2026-11-26: b was REG(1) */ \
     dst->type = REG_DOUBLE; \
     if ((a->type == REG_INT || a->type == REG_DOUBLE) && (b->type == REG_INT || b->type == REG_DOUBLE)) {   \
         double d_a= (a->type == REG_DOUBLE) ? a->value.d : (double)a->value.i; \
@@ -297,7 +297,7 @@ void cmd_jumpifzero(uint16_t* args) {
         return;
     }
     if (cond->value.i != 0) return;
-    if (target_label->value.i >= get_max_label_nr()) {
+    if ((target_label->value.i < 0) || (target_label->value.i >= get_max_label_nr())) {
         CS_SetError(CMD_INVALID_LABEL, "cmd_jumpifzero label unknown");
         return;
     }
@@ -311,7 +311,7 @@ void cmd_jumpifnotzero(uint16_t* args) {
         return;
     }
     if (cond->value.i == 0) return;
-    if (target_label->value.i >= get_max_label_nr()) {
+    if ((target_label->value.i < 0) || (target_label->value.i >= get_max_label_nr())) {
         CS_SetError(CMD_INVALID_LABEL, "cmd_jumpifzero label unknown");
         return;
     }
@@ -324,7 +324,7 @@ void cmd_jump(uint16_t* args) {
         CS_SetError(CMD_TYPE_MISMATCH, "cmd_jump type mismatch");
         return;
     }
-    if (target_label->value.i >= get_max_label_nr()) {
+    if ((target_label->value.i < 0) || (target_label->value.i >= get_max_label_nr())) {
         CS_SetError(CMD_INVALID_LABEL, "cmd_jump label unknown");
         return;
     }
@@ -333,22 +333,34 @@ void cmd_jump(uint16_t* args) {
 
 // ----------- Ethernet I/O -----------
 
+//2026-11-26: server_get_command returns NULL on timeout; that was used without check
+static const char* receive_text(const char* command_name) {
+    const char* text = (const char*)server_get_command(10.0);
+    if (text == NULL) {
+        char buf[100];
+        snprintf(buf, sizeof(buf), "%s: nothing received within 10 s", command_name);
+        CS_SetError(CMD_RUNTIME_ERROR, buf);
+        return "";
+    }
+    return text;
+}
+
 void cmd_recvint(uint16_t* args) {
     Register* dst = REG(0);
     dst->type = REG_INT;
-    dst->value.i = atoll((char*)server_get_command(10.0));
+    dst->value.i = atoll(receive_text("RecvInt"));
 }
 
 void cmd_recvdouble(uint16_t* args) {
     Register* dst = REG(0);
     dst->type = REG_DOUBLE;
-    dst->value.d = atof((char*)server_get_command(10.0));
+    dst->value.d = atof(receive_text("RecvDouble"));
 }
 
 void cmd_recvstring(uint16_t* args) {
     Register* dst = REG(0);
     dst->type = REG_STRING;
-    strncpy(dst->value.s, (char*)server_get_command(10.0), MAX_STRING_LENGTH - 1);
+    strncpy(dst->value.s, receive_text("RecvString"), MAX_STRING_LENGTH - 1);
     dst->value.s[MAX_STRING_LENGTH - 1] = '\0';
 }
 
@@ -372,8 +384,10 @@ void cmd_print(uint16_t* args) {
     case REG_INT:    snprintf(buf, MAX_STRING_LENGTH, "%lld", a->value.i); break;
     case REG_DOUBLE: snprintf(buf, MAX_STRING_LENGTH, "%f", a->value.d); break;
     case REG_STRING: strncpy(buf, a->value.s, MAX_STRING_LENGTH); break;
+    default: buf[0] = 0; break;
     }
-    xil_printf(buf);
+    buf[MAX_STRING_LENGTH - 1] = 0;
+    xil_printf("%s", buf);  //2026-11-26: buf was used as format string
 }
 
 void cmd_printhex(uint16_t* args) {
@@ -390,8 +404,10 @@ void cmd_printhex(uint16_t* args) {
     }
     case REG_STRING: strncpy(buf, a->value.s, MAX_STRING_LENGTH); break;
     case REG_DOUBLE: snprintf(buf, MAX_STRING_LENGTH, "%f", a->value.d); break;
+    default: buf[0] = 0; break;
     }
-    xil_printf(buf);
+    buf[MAX_STRING_LENGTH - 1] = 0;
+    xil_printf("%s", buf);  //2026-11-26: buf was used as format string
 }
 
 void cmd_printbinary(uint16_t* args) {
@@ -414,8 +430,10 @@ void cmd_printbinary(uint16_t* args) {
     }
     case REG_STRING: strncpy(buf, a->value.s, MAX_STRING_LENGTH); break;
     case REG_DOUBLE: snprintf(buf, MAX_STRING_LENGTH, "%f", a->value.d); break;
+    default: buf[0] = 0; break;
     }
-    xil_printf(buf);
+    buf[MAX_STRING_LENGTH - 1] = 0;
+    xil_printf("%s", buf);  //2026-11-26: buf was used as format string
 }
 
 

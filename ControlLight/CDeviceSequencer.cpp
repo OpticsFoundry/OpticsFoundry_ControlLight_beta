@@ -18,6 +18,8 @@ using namespace std;
 #include <sstream>
 #include <fstream>
 #include <vector>
+#include <filesystem>
+#include <iterator>
 
 #ifdef _DEBUG
 #undef THIS_FILE
@@ -592,6 +594,72 @@ bool CDeviceSequencer::UpdateFirmware(const std::string& BootImageFileName, std:
 	bool ok = MyEthernetMultiIOControllerFirefly->UpdateFirmwareQSPI(image.data(), static_cast<uint32_t>(image.size()), report, BackupImage);
 	if (!ok) AddErrorMessage("CDeviceSequencer::UpdateFirmware : firmware update failed:\n" + report);
 	return ok;
+}
+
+static bool WriteBinaryFile(const std::filesystem::path& path, const std::vector<uint8_t>& data, std::string& error) {
+	std::ofstream file(path, std::ios::binary | std::ios::trunc);
+	if (!file) {
+		error = "can't create " + path.string();
+		return false;
+	}
+	if (!data.empty()) file.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
+	file.close();
+	if (file.fail()) {
+		error = "error writing " + path.string();
+		return false;
+	}
+	return true;
+}
+
+bool CDeviceSequencer::SaveFirmware(const std::string& BootImageFileName, std::string& report) {
+	std::vector<uint8_t> image;
+	if (!MyEthernetMultiIOControllerFirefly->ReadFirmwareImage(image, report)) {
+		AddErrorMessage("CDeviceSequencer::SaveFirmware : reading the firmware from the sequencer failed: " + report);
+		return false;
+	}
+	std::string error;
+	if (!WriteBinaryFile(BootImageFileName, image, error)) {
+		report = error;
+		AddErrorMessage("CDeviceSequencer::SaveFirmware : " + error);
+		return false;
+	}
+	report += ", saved as " + BootImageFileName;
+	return true;
+}
+
+bool CDeviceSequencer::CopyFirmwareToSDCard(const std::string& SDCardPath, std::string& report) {
+	//Writes the sequencer's firmware as BOOT.BIN plus the empty marker file INSTALL into SDCardPath (the root folder of
+	//an SD card). Booting another Z-turn from that card (boot mode SD card) installs the firmware into its QSPI flash.
+	namespace fs = std::filesystem;
+	std::error_code ec;
+	const fs::path folder(SDCardPath);
+	if (!fs::is_directory(folder, ec)) {
+		report = "SD card folder " + SDCardPath + " not found";
+		AddErrorMessage("CDeviceSequencer::CopyFirmwareToSDCard : " + report);
+		return false;
+	}
+	std::vector<uint8_t> image;
+	if (!MyEthernetMultiIOControllerFirefly->ReadFirmwareImage(image, report)) {
+		AddErrorMessage("CDeviceSequencer::CopyFirmwareToSDCard : reading the firmware from the sequencer failed: " + report);
+		return false;
+	}
+	std::string error;
+	const fs::path boot_bin = folder / "BOOT.BIN";
+	if (!WriteBinaryFile(boot_bin, image, error) || !WriteBinaryFile(folder / "INSTALL", {}, error)) {
+		report = error;
+		AddErrorMessage("CDeviceSequencer::CopyFirmwareToSDCard : " + error);
+		return false;
+	}
+	//read back and compare
+	std::ifstream check(boot_bin, std::ios::binary);
+	std::vector<uint8_t> written((std::istreambuf_iterator<char>(check)), std::istreambuf_iterator<char>());
+	if (written != image) {
+		report = "BOOT.BIN on the SD card differs from the firmware read from the sequencer";
+		AddErrorMessage("CDeviceSequencer::CopyFirmwareToSDCard : " + report);
+		return false;
+	}
+	report += ", written to " + boot_bin.string() + " together with the marker file INSTALL";
+	return true;
 }
 
 bool CDeviceSequencer::Reboot() {

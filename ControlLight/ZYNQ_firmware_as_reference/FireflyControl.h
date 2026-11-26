@@ -25,3 +25,7 @@ extern void FireflyControlLoop();
 extern void FireflyControl_print_sequence(u32 print_length);
 extern void FireflyControl_RunFastVCOLoop(unsigned long start_buffer_pos, unsigned long AD9854_frequency_buffer_pos);
 extern bool DebugModeOn;
+extern void FireflyControl_init_hardware(void);
+extern u8* FireflyControl_get_scratch_buffer(u32* size_in_bytes);
+extern void SetLED0Color(unsigned char red, unsigned char green, unsigned char blue);
+extern void SwitchBuzzer(unsigned char OnOff);

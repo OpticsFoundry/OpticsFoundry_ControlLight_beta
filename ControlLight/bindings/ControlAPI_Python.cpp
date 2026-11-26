@@ -56,7 +56,15 @@ PYBIND11_MODULE(control_light_api, m) {
         .def("switch_debug_mode", &ControlLight_API::SwitchDebugMode, py::arg("on_off"), py::arg("filename") = "")
         .def("transmit_only_difference_between_command_sequence_if_possible", &ControlLight_API::TransmitOnlyDifferenceBetweenCommandSequenceIfPossible, py::arg("on_off"))
         .def("TransmitOnlyDifferenceBetweenCommandSequenceIfPossible", &ControlLight_API::TransmitOnlyDifferenceBetweenCommandSequenceIfPossible, py::arg("on_off"))
-        .def("is_ready", &ControlLight_API::IsReady)
+        // IsReady reports "not ready" by throwing in the Python build (ERROR_CODE_TYPE is void); return a bool instead
+        .def("is_ready", [](ControlLight_API& self) {
+                try {
+                    self.IsReady();
+                    return true;
+                } catch (const CLA_Exception&) {
+                    return false;
+                }
+            })
         .def("start_assembling_sequence", &ControlLight_API::StartAssemblingSequence)
         .def("start_assembling_next_sequence", &ControlLight_API::StartAssemblingNextSequence)
         .def("set_value", [bytes_to_payload](ControlLight_API& self, unsigned int sequencer, unsigned int address, unsigned int subaddress, py::bytes data, unsigned long data_length_in_bit, uint8_t start_bit) {
@@ -311,6 +319,13 @@ PYBIND11_MODULE(control_light_api, m) {
         .def("update_sequencer_backup_firmware", [](ControlLight_API& self, unsigned int sequencer, const std::string& boot_image_filename) {
                 self.UpdateSequencerBackupFirmware(sequencer, boot_image_filename.c_str());
             }, py::arg("sequencer"), py::arg("boot_image_filename"))
+        .def("save_sequencer_firmware", [](ControlLight_API& self, unsigned int sequencer, const std::string& boot_image_filename) {
+                self.SaveSequencerFirmware(sequencer, boot_image_filename.c_str());
+            }, py::arg("sequencer"), py::arg("boot_image_filename"))
+        // writes BOOT.BIN + INSTALL onto the SD card in the PC's card reader, e.g. sd_card_path = "E:\\"
+        .def("copy_sequencer_firmware_to_sd_card", [](ControlLight_API& self, unsigned int sequencer, const std::string& sd_card_path) {
+                self.CopySequencerFirmwareToSDCard(sequencer, sd_card_path.c_str());
+            }, py::arg("sequencer"), py::arg("sd_card_path"))
         // returns a list of strings, one per sequencer found
         .def("discover_sequencers", [](ControlLight_API& self, double timeout_in_seconds) {
                 std::string text(16384, '\0');

@@ -192,7 +192,9 @@ elseif(BUILD_MODE STREQUAL "PYD")
         control_light_stage_file(control_light_api "$<TARGET_FILE:control_light_api>" "${PYTHON_EXAMPLE_LIB_DIR}")
         control_light_stage_file(control_light_api "$<TARGET_FILE:ControlLight>" "${PYTHON_EXAMPLE_LIB_DIR}")
         control_light_stage_file(control_light_api "$<TARGET_FILE:ControlLight>" "${PIP_PACKAGE_DIR}")
-        control_light_stage_file_as(control_light_api "$<TARGET_FILE:control_light_api>" "${PIP_PACKAGE_DIR}/__init__.pyd")
+        # version tagged module (control_light_api.cp3xx-win_amd64.pyd); the package's __init__.py imports the one
+        # matching the running Python, so modules for several Python versions can be staged side by side
+        control_light_stage_file(control_light_api "$<TARGET_FILE:control_light_api>" "${PIP_PACKAGE_DIR}")
     endif()
 
 else()

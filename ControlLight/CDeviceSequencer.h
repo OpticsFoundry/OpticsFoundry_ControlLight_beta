@@ -118,6 +118,8 @@ public:
 	bool SetPSOptions(uint8_t options);
 	bool GetFirmwareInfo(std::string& info);
 	bool UpdateFirmware(const std::string& BootImageFileName, std::string& report, bool BackupImage = false);
+	bool SaveFirmware(const std::string& BootImageFileName, std::string& report);
+	bool CopyFirmwareToSDCard(const std::string& SDCardPath, std::string& report);
 	bool Reboot();
 	void SetSequencerDigitalOut(uint8_t dig_out_pattern);
 	void SetSequencer_PL_to_PS_command(uint8_t PL_to_PS_command);

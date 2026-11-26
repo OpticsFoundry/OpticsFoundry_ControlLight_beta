@@ -3,6 +3,7 @@
 #include "NetworkClient.h"	// Added by ClassView
 #include "EthernetControllerFirefly.h"
 #include <functional>
+#include <vector>
 #include "std.h"
 
 
@@ -119,6 +120,7 @@ public:
 	//firmware maintenance (sequencer firmware from 2026-11-26 on)
 	bool GetFirmwareInfo(std::string& info);
 	bool UpdateFirmwareQSPI(const uint8_t* image, uint32_t size, std::string& report, bool backup_image = false);
+	bool ReadFirmwareImage(std::vector<uint8_t>& image, std::string& report);
 	bool RebootSystem();
 
 	void DebugBuffer(const std::string& filename);

@@ -31,6 +31,7 @@ extern void RunEventLoop(); //defined in main.c
 
 #include "FireflyControl.h"
 #include "firmware_update.h"
+#include "sd_installer.h"
 
 //I2C port
 #include "xiicps.h"
@@ -661,22 +662,31 @@ void ResetStopWatch() {
 	ToggleConfigBit(11);
 }
 
+//The RGB status LED signals drive both the Z-turn's onboard RGB LED and the RGB LED on the front panel of the
+//carrier board, which light up in opposite polarity. 1: the colors are correct on the front panel (the onboard LED
+//shows the inverted colors); 0: correct on the onboard LED. (2026-11-26)
+#define STATUS_LED_ACTIVE_LOW 1
+
+static bool StatusLEDBit(unsigned char OnOff) {
+	return STATUS_LED_ACTIVE_LOW ? (OnOff == 0) : (OnOff > 0);
+}
+
 void SetLED0Red(unsigned char OnOff) {
-	WriteConfigBit(12,OnOff > 0);
+	WriteConfigBit(12, StatusLEDBit(OnOff));
 }
 
 void SetLED0Green(unsigned char OnOff) {
-	WriteConfigBit(13,OnOff > 0);
+	WriteConfigBit(13, StatusLEDBit(OnOff));
 }
 
 void SetLED0Blue(unsigned char OnOff) {
-	WriteConfigBit(14,OnOff > 0);
+	WriteConfigBit(14, StatusLEDBit(OnOff));
 }
 
 void SetLED0Color(unsigned char red, unsigned char green, unsigned char blue) {
 	u32 mask = (1+2+4) << 12;
 	//if (DebugModeOn) xil_printf(" mask = 0x%x", mask);
-	u32 newbits = (((red>0) ? (1<< 12) : 0) | ((green>0) ? (2<< 12) : 0) | ((blue>0) ? (4<< 12) : 0));
+	u32 newbits = ((StatusLEDBit(red) ? (1<< 12) : 0) | (StatusLEDBit(green) ? (2<< 12) : 0) | (StatusLEDBit(blue) ? (4<< 12) : 0));
 	//if (DebugModeOn) xil_printf(" newbits = 0x%x", newbits);
 	fabric_config = (fabric_config & ~mask) | newbits;
 	//if (DebugModeOn) xil_printf(" config = 0x%x", fabric_config);
@@ -1192,7 +1202,9 @@ void ExtIrq_Handler(void *InstancePtr)
 
 	  //if (DebugModeOn) xil_printf("\r\nExtIrq_Handler DMA Nr %d Max start space = %d\r\n",NextDMA0Transfer,Current_DMA_transfer_max_start_space);
 
-	  u32 TransferToDo = (extended_addr / (DMA0TransferSize/4)) + 1;
+	  //extended_addr is the sequence line (64-bit command) number; a DMA0 transfer is DMA0TransferSize/8 lines.
+	  //2026-11-26: was divided by DMA0TransferSize/4, i.e. twice the block size, so "too late" could never be detected
+	  u32 TransferToDo = (extended_addr / (DMA0TransferSize/8)) + 1;
 	  if (TransferToDo != NextDMA0Transfer) {
 		  if (TransferToDo > NextDMA0Transfer) {
 			  if (DebugModeOn) xil_printf("\r\nExtIrq_Handler error: too late (DMA0 Nr %d)\r\n",NextDMA0Transfer);
@@ -1385,7 +1397,8 @@ u32 LastPLtoPSCommand = 0;
 XTime tSequenceStart;
 long double last_sequence_print_status_time_in_seconds = 0;
 bool FireflyControl_start(unsigned long long start_pos, bool reset_input_buffer) {
-	Sequence_start_pos_in_64bit_commands = start_pos;
+	//2026-11-26: check before truncating start_pos to 32 bits (positions >= 2^32 wrapped around and passed the check)
+	Sequence_start_pos_in_64bit_commands = (start_pos < Sequence_length_in_64bit_commands) ? (u32)start_pos : Sequence_length_in_64bit_commands;
 	if (Sequence_length_in_64bit_commands <= Sequence_start_pos_in_64bit_commands) {
 		if (DebugModeOn) xil_printf("FireflyControl_start no sequence to execute\r\n");
 		StopSequenceOnError(6);
@@ -1783,7 +1796,7 @@ void AddCommandWriteInputBuffer(u8 write_address, u32 address, u32 data, u32 wai
 }
 
 u32 ReadInputBuffer(u32 n) {
-	if (n>(BRAM_INPUT_BUFFER_SIZE_IN_BYTES/4)) {
+	if (n>=(BRAM_INPUT_BUFFER_SIZE_IN_BYTES/4)) { //2026-11-26: was ">", one word beyond the buffer
 		if (DebugModeOn) xil_printf("ReadInputBuffer requested data beyond BRAM buffer size. ToDo: Program interrupt driven DMA transfer from BRAM to DDR.\r\n");
 		return 0;
 	}
@@ -1797,10 +1810,11 @@ void firefly_control_test_adc() {
 	DMA0Done = 0;
 
 	// Following code is required only if Cache is enabled
-	Xil_DCacheFlushRange((u32)&source, DDR_OUTPUT_BUFFER_LENGTH_IN_BYTES);
-	Xil_DCacheFlushRange((u32)&destination, BRAM_OUTPUT_BUFFER_LENGTH);
-	Xil_DCacheFlushRange((u32)&BRAM_input_buffer, BRAM_INPUT_BUFFER_SIZE_IN_BYTES);
-	Xil_DCacheFlushRange((u32)&DDR_input_buffer, DDR_INPUT_BUFFER_LENGTH_IN_BYTES);
+	//2026-11-26: flushed from the address of the pointer variables (&source etc.) instead of the buffers they point to
+	Xil_DCacheFlushRange((UINTPTR)source, DDR_OUTPUT_BUFFER_LENGTH_IN_BYTES);
+	Xil_DCacheFlushRange((UINTPTR)destination, BRAM_OUTPUT_BUFFER_LENGTH);
+	Xil_DCacheFlushRange((UINTPTR)BRAM_input_buffer, BRAM_INPUT_BUFFER_SIZE_IN_BYTES);
+	Xil_DCacheFlushRange((UINTPTR)DDR_input_buffer, DDR_INPUT_BUFFER_LENGTH_IN_BYTES);
 
 	//create sequence
 	u8 max_register = 0x3F;
@@ -1880,10 +1894,11 @@ void firefly_control_execute_test_sequence () {
 	DMA0Done = 0;
 
 	// Following code is required only if Cache is enabled
-	Xil_DCacheFlushRange((u32)&source, DDR_OUTPUT_BUFFER_LENGTH_IN_BYTES);
-	Xil_DCacheFlushRange((u32)&destination, BRAM_OUTPUT_BUFFER_LENGTH);
-	Xil_DCacheFlushRange((u32)&BRAM_input_buffer, BRAM_INPUT_BUFFER_SIZE_IN_BYTES);
-	Xil_DCacheFlushRange((u32)&DDR_input_buffer, DDR_INPUT_BUFFER_LENGTH_IN_BYTES);
+	//2026-11-26: flushed from the address of the pointer variables (&source etc.) instead of the buffers they point to
+	Xil_DCacheFlushRange((UINTPTR)source, DDR_OUTPUT_BUFFER_LENGTH_IN_BYTES);
+	Xil_DCacheFlushRange((UINTPTR)destination, BRAM_OUTPUT_BUFFER_LENGTH);
+	Xil_DCacheFlushRange((UINTPTR)BRAM_input_buffer, BRAM_INPUT_BUFFER_SIZE_IN_BYTES);
+	Xil_DCacheFlushRange((UINTPTR)DDR_input_buffer, DDR_INPUT_BUFFER_LENGTH_IN_BYTES);
 
 
 	//StartNewProgram();
@@ -1951,6 +1966,22 @@ void firefly_control_test_timer() {
 
 u8 InFireflyControlLoop = 0;
 u8 called_once = 0;
+
+/* initializes the AXI GPIOs to the FPGA core (LED, buzzer, ...); also usable before the network is set up */
+void FireflyControl_init_hardware(void) {
+	if (called_once == 0) {
+		configure_axi_gpio();
+		called_once = 1;
+		SetLED0Color(0, 0, 0);  //with an active low status LED, all bits 0 would mean white
+	}
+}
+
+/* DDR buffer used transiently by modify_sequence, firmware updates and the SD card installer */
+u8* FireflyControl_get_scratch_buffer(u32* size_in_bytes) {
+	*size_in_bytes = DDR_MODIFY_BUFFER_LENGTH_IN_BYTES;
+	return (u8*)(DDR_MODIFY_BUFFER_START);
+}
+
 u8 LED0_white = FALSE;
 const u32 wait_color_cycles = 8*50;
 const u32 wait_white_cycles = 8*10;
@@ -2469,6 +2500,10 @@ void FireflyControlLoop() {
 			FirmwareUpdate_update_qspi((u8*)(DDR_MODIFY_BUFFER_START), DDR_MODIFY_BUFFER_LENGTH_IN_BYTES, Sequence_running, /*backup_image*/ true);
 		} else if (strcmp(command,"test_backup_boot") == 0) {
 			FirmwareUpdate_test_backup_boot(Sequence_running);
+		} else if (strcmp(command,"install_from_sd") == 0) {
+			SdInstaller_install_command(Sequence_running);
+		} else if (strcmp(command,"read_firmware_image") == 0) {
+			FirmwareUpdate_send_image((u8*)(DDR_MODIFY_BUFFER_START), DDR_MODIFY_BUFFER_LENGTH_IN_BYTES, Sequence_running);
 		} else if (strcmp(command,"reboot_system") == 0) {
 			FirmwareUpdate_reboot();
 		} else

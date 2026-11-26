@@ -33,6 +33,15 @@
  *         Afterwards, write the primary image again with update_firmware_qspi.
  *      -> or "ERROR ...\n"
  *
+ *  install_from_sd   (see sd_installer.h)
+ *      writes BOOT.BIN from the SD card into both slots
+ *
+ *  read_firmware_image
+ *      -> "OK <primary|backup> <size in bytes> <CRC32, decimal>\n", then the raw boot image (a BOOT.BIN)
+ *      -> or "ERROR ...\n"
+ *      Sends the image the board booted from QSPI flash (after booting from SD card: the primary image,
+ *      or the backup image if the primary one is invalid). Its length is taken from the partition headers.
+ *
  *  reboot_system
  *      -> "OK rebooting\n", then a full system (PS + PL) software reset.
  *      The BootROM then boots from the medium selected by the boot mode jumpers.
@@ -49,6 +58,7 @@
 void FirmwareUpdate_send_firmware_info(void);
 void FirmwareUpdate_update_qspi(u8* buffer, u32 buffer_size_in_bytes, bool sequence_running, bool backup_image);
 void FirmwareUpdate_test_backup_boot(bool sequence_running);
+void FirmwareUpdate_send_image(u8* buffer, u32 buffer_size, bool sequence_running);
 void FirmwareUpdate_reboot(void);
 
 /* Reads and caches flash IDs and image slot status. Called automatically; can be called before the network is set up. */
@@ -62,3 +72,11 @@ bool FirmwareUpdate_read_flash_unique_id(u8 unique_id[8]);  /* false if the flas
 void FirmwareUpdate_describe(char* text, size_t size);
 
 u32 FirmwareUpdate_crc32(const u8* data, u32 length);  /* zlib / IEEE 802.3 CRC32 */
+
+/* Writes a boot image into both QSPI slots (primary first), skipping slots that already contain it.
+ * use_network: report progress to the connected PC and service the network while writing (false at start-up).
+ * Returns one of the FIRMWARE_INSTALL_ values; summary receives a one-line description. */
+#define FIRMWARE_INSTALL_FAILED      0
+#define FIRMWARE_INSTALL_WRITTEN     1
+#define FIRMWARE_INSTALL_UP_TO_DATE  2
+int FirmwareUpdate_install_image(const u8* image, u32 size, bool use_network, char* summary, size_t summary_size);

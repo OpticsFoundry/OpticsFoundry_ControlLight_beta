@@ -16,6 +16,8 @@
 #include <algorithm>
 #include <limits>
 #include <vector>
+#include <sstream>
+#include <format>
 
 
 #ifdef _DEBUG
@@ -1835,6 +1837,52 @@ bool CEthernetControllerFirefly::UpdateFirmwareQSPI(const uint8_t* image, uint32
 	}
 	report += "\n" + CStringToStdString(answer);
 	return (CStringToStdString(answer).rfind("OK", 0) == 0);
+}
+
+bool CEthernetControllerFirefly::ReadFirmwareImage(std::vector<uint8_t>& image, std::string& report) {
+	//Reads the boot image (BOOT.BIN) the sequencer booted from its QSPI flash. Needs sequencer firmware from 2026-11-26 (evening) on.
+	image.clear();
+	report = "";
+	if (!Connected) {
+		report = "not connected to sequencer";
+		return false;
+	}
+	if (!Command("read_firmware_image")) {
+		report = "sequencer didn't accept command read_firmware_image";
+		return false;
+	}
+	CString answer;
+	if (!GetCommand(answer, /*timeout_in_seconds*/ 30)) {
+		report = "no answer from sequencer. Sequencer firmware older than 2026-11-26 doesn't support reading its firmware.";
+		return false;
+	}
+	const std::string line = CStringToStdString(answer);
+	if (line.rfind("OK ", 0) != 0) {
+		report = line;
+		return false;
+	}
+	std::istringstream fields(line.substr(3));
+	std::string slot;
+	unsigned long long size = 0, crc = 0;
+	fields >> slot >> size >> crc;
+	if (fields.fail() || (size == 0) || (size > 16 * 1024 * 1024)) {
+		report = "invalid answer from sequencer: " + line;
+		return false;
+	}
+	image.resize(static_cast<size_t>(size));
+	if (!Network || !Network->ReceiveData(image.data(), static_cast<unsigned long>(size), /*timeout_ms*/ 60000)) {
+		image.clear();
+		report = "error receiving the firmware image";
+		return false;
+	}
+	const uint32_t received_crc = FirmwareCRC32(image.data(), static_cast<uint32_t>(size));
+	if (received_crc != crc) {
+		image.clear();
+		report = std::format("CRC32 of the received firmware image is wrong (0x{:08X} instead of 0x{:08X})", received_crc, crc);
+		return false;
+	}
+	report = std::format("{} firmware image, {} bytes, CRC32 0x{:08X}", slot, size, received_crc);
+	return true;
 }
 
 bool CEthernetControllerFirefly::RebootSystem() {

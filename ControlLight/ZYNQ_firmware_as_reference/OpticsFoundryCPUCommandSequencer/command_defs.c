@@ -170,7 +170,7 @@ CommandDef command_defs[] = {
     { "ExecuteFPGASequence", cmd_executeFPGAsequence, 1 },
 	{ "WaitTillSequenceFinished", cmd_waittillsequencefinished, 1 },
 	{ "GetInputBufferValue", cmd_getinputbuffervalue, 2 },
-	{ "GetFPGABuffer", cmd_getFPGAbuffer, 1 },
+	{ "GetFPGABuffer", cmd_getFPGAbuffer, 2 }, //GetFPGABuffer(destination, buffer_position); 2026-11-26: was declared with 1 argument
 	{ "SetFPGABuffer", cmd_setFPGAbuffer, 2 },
 
 
@@ -189,7 +189,7 @@ CommandDef command_defs[] = {
     { "RunFastVCOLoop", cmd_runfastvcoloop, 2 },
     { "PrintFPGABuffer", cmd_printfpgabuffer, 1},
 	{ "CheckEthernetCommand", cmd_checkethernetcommand, 1 },
-	{ "PID", cmd_pid, 7 } //Usage: PID(out_register, target, measurement, p, i, d, pid_nr);
+	{ "PID", cmd_pid, 8 } //Usage: PID(out, target, measurement, p, i, d, last_error, integral); last_error and integral hold the PID state. 2026-11-26: was declared with 7 arguments, so the integral was stored in R0
 
 };
 

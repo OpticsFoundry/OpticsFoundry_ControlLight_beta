@@ -1473,6 +1473,19 @@ void DemoDiscoverSequencers() {
 	else cout << "Sequencers found:" << endl << result;
 }
 
+void DemoCopySequencerFirmwareToSDCard() {
+	//Creates an installer SD card with the firmware of sequencer 0: writes its firmware as BOOT.BIN plus the marker file INSTALL
+	//onto the SD card in this PC's card reader. Booting another Z-turn from that card (boot mode SD card: JP1 open, JP2 closed)
+	//installs the firmware into its QSPI flash; afterwards set both jumpers to closed. Needs sequencer firmware from 2026-11-26 on.
+	const char* SDCardPath = "E:\\";  //root folder of the SD card (FAT32)
+	if (!InitializeSystem()) {
+		return;
+	}
+	cout << "Copying the firmware of sequencer 0 onto the SD card " << SDCardPath << endl;
+	if (CLA_CopySequencerFirmwareToSDCard(/*SequencerNr*/ 0, SDCardPath)) cout << "Done. Eject the SD card safely before removing it." << endl;
+	else cout << "Failed: " << CLA_GetLastError() << endl;
+}
+
 void DemoSequencerFirmwareInfo() {
 	//Shows build date, boot mode and QSPI flash ID of the firmware running on sequencer 0 (needs sequencer firmware from 2026-11-26 on)
 	if (!InitializeSystem()) {
@@ -1530,6 +1543,7 @@ int main() {
 	//DemoDiscoverSequencers();          //Finds all sequencers on the local networks and shows their MAC and IP addresses
 	//DemoSequencerFirmwareInfo();       //Shows build date, boot mode and QSPI flash ID of the sequencer firmware
 	//DemoUpdateSequencerFirmware();     //Writes a new firmware boot image over Ethernet into the sequencer's QSPI flash and reboots the sequencer
+	//DemoCopySequencerFirmwareToSDCard(); //Creates an installer SD card with the sequencer's firmware, to set up another Z-turn board
 	
 	//Unfinished demos:
 	//DemoDDSVCO();                      //Unfinished demo of the fast digital VCO capability of the sequencer.

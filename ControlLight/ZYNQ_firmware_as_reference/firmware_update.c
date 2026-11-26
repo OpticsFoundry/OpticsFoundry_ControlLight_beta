@@ -23,6 +23,7 @@
 #include "echo.h"
 #include "firmware_update.h"
 #include "sequencer_identity.h"
+#include "sd_installer.h"
 
 extern bool DebugModeOn;
 extern void RunEventLoop();
@@ -95,6 +96,12 @@ static bool FlashUniqueIdValid = false;
 static bool PrimaryImageValid = false;
 static bool BackupImageValid = false;
 static bool FlashOperationInProgress = false;
+/* false while installing from SD card at start-up, before the network exists: reports only go to the UART */
+static bool UseNetwork = true;
+
+static void ServiceNetwork(void) {
+	if (UseNetwork) RunEventLoop();
+}
 
 static u32 ElapsedMs(XTime start) {
 	XTime now;
@@ -110,12 +117,13 @@ static void WaitMsServicingNetwork(u32 ms) {
 
 /* send one line of text to the PC and push it out immediately */
 static void SendLine(const char* format, ...) {
-	char line[600];
+	char line[1000];
 	va_list args;
 	va_start(args, format);
 	vsnprintf(line, sizeof(line) - 2, format, args);
 	va_end(args);
 	xil_printf("%s\r\n", line);
+	if (!UseNetwork) return;
 	strcat(line, "\n");
 	server_send_ascii(line);
 	if (last_tpcb) tcp_output(last_tpcb);
@@ -150,7 +158,7 @@ static bool FlashWaitWhileBusy(u32 timeout_ms, bool service_network) {
 	XTime_GetTime(&start);
 	while (FlashReadStatus() & FLASH_STATUS_BUSY) {
 		if (ElapsedMs(start) > timeout_ms) return false;
-		if (service_network) RunEventLoop();
+		if (service_network) ServiceNetwork();
 	}
 	return true;
 }
@@ -345,9 +353,12 @@ void FirmwareUpdate_describe(char* text, size_t size) {
 void FirmwareUpdate_send_firmware_info(void) {
 	char firmware[256];
 	char identity[160];
+	char sd_install[200];
 	FirmwareUpdate_describe(firmware, sizeof(firmware));
 	SequencerIdentity_describe(identity, sizeof(identity));
-	SendLine("OpticsFoundry Z-turn sequencer firmware; %s; %s; supports update_firmware_qspi, update_backup_firmware_qspi, test_backup_boot, reboot_system, discovery", firmware, identity);
+	SdInstaller_describe(sd_install, sizeof(sd_install));
+	SendLine("OpticsFoundry Z-turn sequencer firmware; %s; %s%s; supports update_firmware_qspi, update_backup_firmware_qspi, test_backup_boot, install_from_sd, reboot_system, discovery",
+			firmware, identity, sd_install);
 }
 
 /* verify flash against data, returns false and sends an error line on mismatch */
@@ -362,7 +373,7 @@ static bool VerifyFlash(u32 flash_address, const u8* data, u32 length, const cha
 					(unsigned long)(flash_address + done + i), flash[i], data[done + i], recovery_hint);
 			return false;
 		}
-		if (((flash_address + done) % FLASH_SECTOR_SIZE) == 0) RunEventLoop();
+		if (((flash_address + done) % FLASH_SECTOR_SIZE) == 0) ServiceNetwork();
 	}
 	return true;
 }
@@ -395,7 +406,7 @@ static bool WriteImageToSlot(u32 slot_offset, const u8* image, u32 size, const c
 				return false;
 			}
 		}
-		if ((address % FLASH_SECTOR_SIZE) == 0) RunEventLoop();
+		if ((address % FLASH_SECTOR_SIZE) == 0) ServiceNetwork();
 	}
 	u32 program_ms = ElapsedMs(t0);
 
@@ -503,6 +514,131 @@ void FirmwareUpdate_update_qspi(u8* buffer, u32 buffer_size, bool sequence_runni
 	WriteImageToSlot(slot_offset, buffer, size, recovery_hint);
 	UpdateCachedSlotStatus();
 	FlashOperationInProgress = false;
+}
+
+/* true if the slot already contains exactly this image */
+static bool SlotContainsImage(u32 slot_offset, const u8* image, u32 size) {
+	for (u32 done = 0; done < size; done += FLASH_READ_CHUNK) {
+		u32 chunk = ((size - done) < FLASH_READ_CHUNK) ? (size - done) : FLASH_READ_CHUNK;
+		if (memcmp(FlashRead(slot_offset + done, chunk), image + done, chunk) != 0) return false;
+		if (((slot_offset + done) % FLASH_SECTOR_SIZE) == 0) ServiceNetwork();
+	}
+	return true;
+}
+
+int FirmwareUpdate_install_image(const u8* image, u32 size, bool use_network, char* summary, size_t summary_size) {
+	char error[160];
+	int result = FIRMWARE_INSTALL_FAILED;
+	snprintf(summary, summary_size, "failed");
+	FirmwareUpdate_init();
+	if (FlashOperationInProgress || !QspiReady) {
+		snprintf(summary, summary_size, "failed: QSPI flash not available");
+		return result;
+	}
+	if (FlashUsableSize(FlashJedecId) < FLASH_MAX_SIZE_3BYTE) {
+		snprintf(summary, summary_size, "failed: no supported 16 MB QSPI flash (JEDEC ID %02X %02X %02X)", FlashJedecId[0], FlashJedecId[1], FlashJedecId[2]);
+		return result;
+	}
+	u8 status = FlashReadStatus();
+	if (status & FLASH_STATUS_BP_MASK) {
+		snprintf(summary, summary_size, "failed: QSPI flash is write protected (status register 0x%02X)", status);
+		return result;
+	}
+	if ((size < BOOT_IMAGE_MIN_SIZE) || (size > BACKUP_IMAGE_MAX_SIZE)) {
+		snprintf(summary, summary_size, "failed: invalid image size %lu bytes", (unsigned long)size);
+		return result;
+	}
+	if (!ValidateBootHeader(image, error, sizeof(error))) {
+		snprintf(summary, summary_size, "failed: %s", error);
+		return result;
+	}
+	UseNetwork = use_network;
+	FlashOperationInProgress = true;
+	bool written = false;
+	bool ok = true;
+	/* primary first, so that there is always one complete image if the installation is interrupted */
+	const u32 slots[2] = { QSPI_PRIMARY_IMAGE_OFFSET, QSPI_BACKUP_IMAGE_OFFSET };
+	const char* names[2] = { "primary", "backup" };
+	for (int i = 0; (i < 2) && ok; i++) {
+		if (SlotContainsImage(slots[i], image, size)) {
+			SendLine("OK %s image is already identical, not written", names[i]);
+			continue;
+		}
+		ok = WriteImageToSlot(slots[i], image, size, "Install the image again.");
+		written = written || ok;
+	}
+	UpdateCachedSlotStatus();
+	FlashOperationInProgress = false;
+	UseNetwork = true;
+	if (!ok) {
+		snprintf(summary, summary_size, "failed while writing the QSPI flash");
+		return result;
+	}
+	snprintf(summary, summary_size, written ? "installed %lu byte image, CRC32 0x%08lX, into both QSPI slots" : "QSPI flash already contained this %lu byte image (CRC32 0x%08lX)",
+			(unsigned long)size, (unsigned long)Crc32(image, size));
+	return written ? FIRMWARE_INSTALL_WRITTEN : FIRMWARE_INSTALL_UP_TO_DATE;
+}
+
+/* length in bytes of the boot image in a slot, from its partition header table; 0 if there is no valid image.
+ * The image ends with the end of its last partition (FSBL, bitstream, application). */
+#define BOOT_HEADER_PARTITION_TABLE_OFFSET 0x9C
+#define PARTITION_HEADER_SIZE 64
+#define MAX_PARTITIONS 16
+static u32 SlotImageLength(u32 slot_offset) {
+	char error[100];
+	if (!ValidateBootHeader(FlashRead(slot_offset, BOOT_HEADER_CHECK_SIZE), error, sizeof(error))) return 0;
+	u32 table = ReadLE32(FlashRead(slot_offset + BOOT_HEADER_PARTITION_TABLE_OFFSET, 4));
+	if ((table < BOOT_HEADER_PARTITION_TABLE_OFFSET + 4) || (table > 0x10000)) return 0;
+	u32 end = 0;
+	for (int i = 0; i < MAX_PARTITIONS; i++) {
+		const u8* partition = FlashRead(slot_offset + table + i * PARTITION_HEADER_SIZE, PARTITION_HEADER_SIZE);
+		bool empty = true;
+		for (int k = 0; k < PARTITION_HEADER_SIZE - 4; k++) if (partition[k] != 0) empty = false;  /* last word is the checksum */
+		if (empty) break;
+		u32 total_length_in_words = ReadLE32(partition + 8);
+		u32 data_offset_in_words = ReadLE32(partition + 20);
+		u32 partition_end = (data_offset_in_words + total_length_in_words) * 4;
+		if (partition_end > end) end = partition_end;
+	}
+	return end;
+}
+
+void FirmwareUpdate_send_image(u8* buffer, u32 buffer_size, bool sequence_running) {
+	if (sequence_running) {
+		SendLine("ERROR read_firmware_image: a sequence is running");
+		return;
+	}
+	FirmwareUpdate_init();
+	if (!QspiReady || FlashOperationInProgress) {
+		SendLine("ERROR read_firmware_image: QSPI flash not available");
+		return;
+	}
+	/* the image the board booted from QSPI; after booting from SD card or JTAG the primary image (or the backup image if the primary one is invalid) */
+	u32 booted = BootedImageOffset();
+	u32 slot = (booted == QSPI_BACKUP_IMAGE_OFFSET) ? QSPI_BACKUP_IMAGE_OFFSET : QSPI_PRIMARY_IMAGE_OFFSET;
+	u32 size = SlotImageLength(slot);
+	if ((size == 0) && (booted == 0xFFFFFFFF) && (slot == QSPI_PRIMARY_IMAGE_OFFSET)) {
+		slot = QSPI_BACKUP_IMAGE_OFFSET;
+		size = SlotImageLength(slot);
+	}
+	u32 slot_size = (slot == QSPI_BACKUP_IMAGE_OFFSET) ? BACKUP_IMAGE_MAX_SIZE : PRIMARY_IMAGE_MAX_SIZE;
+	if ((size < BOOT_IMAGE_MIN_SIZE) || (size > slot_size) || (size > buffer_size)) {
+		SendLine("ERROR read_firmware_image: no valid boot image in the QSPI flash");
+		return;
+	}
+	for (u32 done = 0; done < size; done += FLASH_READ_CHUNK) {
+		u32 chunk = ((size - done) < FLASH_READ_CHUNK) ? (size - done) : FLASH_READ_CHUNK;
+		memcpy(buffer + done, FlashRead(slot + done, chunk), chunk);
+		if ((done % FLASH_SECTOR_SIZE) == 0) ServiceNetwork();
+	}
+	char error[100];
+	if (!ValidateBootHeader(buffer, error, sizeof(error))) {
+		SendLine("ERROR read_firmware_image: %s", error);
+		return;
+	}
+	SendLine("OK %s %lu %lu", (slot == QSPI_BACKUP_IMAGE_OFFSET) ? "backup" : "primary", (unsigned long)size, (unsigned long)Crc32(buffer, size));
+	server_send_binary((char*)buffer, size, DebugModeOn);
+	if (last_tpcb) tcp_output(last_tpcb);
 }
 
 void FirmwareUpdate_test_backup_boot(bool sequence_running) {

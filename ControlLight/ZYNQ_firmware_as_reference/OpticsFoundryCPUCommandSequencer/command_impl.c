@@ -522,10 +522,16 @@ extern void cmd_getFPGAbuffer(uint16_t* args) {
     }
 }
 
+//2026-11-26: the commands below checked the argument types with || instead of &&, so a double argument was
+//used as raw bit pattern. Now both arguments are converted to integers (int or double accepted, string rejected).
+static bool get_two_int_arguments(uint16_t* args, int64_t* first, int64_t* second) {
+    return get_register_as_int(ARG(0), first) && get_register_as_int(ARG(1), second);
+}
+
 extern void cmd_setFPGAbuffer(uint16_t* args) {
-    Register* buf_pos = REG(0), * value = REG(1);
-    if ((buf_pos->type == REG_INT) || (value->type == REG_INT)) {
-        OpticsFoundryFPGA_SetFPGABuffer(buf_pos->value.i, value->value.i);
+    int64_t buf_pos, value;
+    if (get_two_int_arguments(args, &buf_pos, &value)) {
+        OpticsFoundryFPGA_SetFPGABuffer(buf_pos, value);
     }
     else {
         CS_SetError(CMD_TYPE_MISMATCH, "SetFPGABuffer type mismatch");
@@ -534,9 +540,9 @@ extern void cmd_setFPGAbuffer(uint16_t* args) {
 
 #define DEFINE_AD9854(name, op) \
 void name(uint16_t* args) { \
-    Register* buf_pos = REG(0), * value = REG(1);\
-    if ((buf_pos->type == REG_INT) || (value->type == REG_INT)) {\
-        op(buf_pos->value.i, value->value.i);\
+    int64_t buf_pos, value;\
+    if (get_two_int_arguments(args, &buf_pos, &value)) {\
+        op(buf_pos, value);\
     }\
     else {\
         CS_SetError(CMD_TYPE_MISMATCH, #name " type mismatch");\
@@ -552,9 +558,9 @@ DEFINE_AD9854(cmd_setAD9854controlword, OpticsFoundryFPGA_SetAD9858ControlWordAt
 
 
 extern void cmd_setanalogout(uint16_t* args) {
-    Register* buf_pos = REG(0), * value = REG(1);
-    if ((buf_pos->type == REG_INT) || (value->type == REG_INT)) {
-        OpticsFoundryFPGA_SetAnalogOutAtBufferPosition(buf_pos->value.i, value->value.i);
+    int64_t buf_pos, value;
+    if (get_two_int_arguments(args, &buf_pos, &value)) {
+        OpticsFoundryFPGA_SetAnalogOutAtBufferPosition(buf_pos, value);
     }
     else {
         CS_SetError(CMD_TYPE_MISMATCH, "SetAnalogOut type mismatch");
@@ -572,9 +578,9 @@ extern void cmd_checkethernetcommand(uint16_t* args) {
 }
 
 extern void cmd_runfastvcoloop(uint16_t* args) {
-    Register* buf_start_pos = REG(0), * buf_AD9854_frequency_pos = REG(1);
-    if ((buf_start_pos->type == REG_INT) || (buf_AD9854_frequency_pos->type == REG_INT)) {
-		OpticsFoundryFPGA_RunFastVCOLoop(buf_start_pos->value.i, buf_AD9854_frequency_pos->value.i);
+    int64_t buf_start_pos, buf_AD9854_frequency_pos;
+    if (get_two_int_arguments(args, &buf_start_pos, &buf_AD9854_frequency_pos) && (buf_start_pos >= 0) && (buf_AD9854_frequency_pos >= 0)) {
+		OpticsFoundryFPGA_RunFastVCOLoop(buf_start_pos, buf_AD9854_frequency_pos);
     }
     else {
         CS_SetError(CMD_TYPE_MISMATCH, "RunFastVCOLoop type mismatch");

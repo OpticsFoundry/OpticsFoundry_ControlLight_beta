@@ -408,6 +408,24 @@ namespace CLA { //optional, for C++ APIs, use namespace CLA, instead of precedin
 		/// @return See return convention above.
 		API_EXPORT ERROR_CODE_TYPE CLA_FN(UpdateSequencerBackupFirmware)(const unsigned int& Sequencer, const char* BootImageFileName);
 
+		/// @brief Read the firmware boot image of the sequencer from its QSPI flash and save it as a file (a BOOT.BIN).
+		/// This is the image the sequencer booted from QSPI flash (after booting from SD card: its primary image).
+		/// Needs sequencer firmware from 2026-11-26 (evening) on.
+		/// @param Sequencer the sequencer number.
+		/// @param BootImageFileName path of the file to write.
+		/// @return See return convention above.
+		API_EXPORT ERROR_CODE_TYPE CLA_FN(SaveSequencerFirmware)(const unsigned int& Sequencer, const char* BootImageFileName);
+
+		/// @brief Copy the firmware of the sequencer onto an SD card (in the PC's card reader), creating an installer SD card.
+		/// Writes the firmware boot image read from the sequencer's QSPI flash as BOOT.BIN, plus the empty marker file INSTALL, into SDCardPath.
+		/// Booting another Z-turn from that card (boot mode jumpers on SD card) copies the firmware into its QSPI flash.
+		/// The card must be formatted with FAT32 (or FAT16). Eject the card safely before removing it from the PC.
+		/// Needs sequencer firmware from 2026-11-26 (evening) on.
+		/// @param Sequencer the sequencer number.
+		/// @param SDCardPath root folder of the SD card, e.g. "E:\\".
+		/// @return See return convention above.
+		API_EXPORT ERROR_CODE_TYPE CLA_FN(CopySequencerFirmwareToSDCard)(const unsigned int& Sequencer, const char* SDCardPath);
+
 		/// @brief Find OpticsFoundry sequencers on all local networks by UDP broadcast (port 57979). Doesn't need an initialized system.
 		/// Each sequencer answers with one line, e.g. "OpticsFoundry sequencer; MAC 02:4F:46:E2:9D:95; IP 192.168.1.159; TCP port 57978; build ...".
 		/// Needs sequencer firmware from 2026-11-26 on. Finding no sequencer is not an error.

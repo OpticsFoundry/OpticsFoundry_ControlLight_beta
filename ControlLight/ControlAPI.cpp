@@ -1384,6 +1384,34 @@ bool CLA_InitializeMFC(bool InitializeAfx, bool InitializeAfxSocket) {
 			API_UNLOCK_RETURN_ERROR(ok && !NewErrorOccured, "CLA_UpdateSequencerBackupFirmware: error");
 		}
 
+		API_EXPORT ERROR_CODE_TYPE CLA_FNDEF(SaveSequencerFirmware)(const unsigned int& Sequencer, const char* BootImageFileName) {
+			API_LOCK_GUARD;
+			CDeviceSequencer* sequencer = GetSequencer(Sequencer);
+			if (!sequencer) {
+				API_UNLOCK_RETURN_ERROR(false, "CLA_SaveSequencerFirmware: Invalid sequencer");
+			}
+			if (!BootImageFileName) {
+				API_UNLOCK_RETURN_ERROR(false, "CLA_SaveSequencerFirmware: no file name given");
+			}
+			std::string report;
+			bool ok = sequencer->SaveFirmware(BootImageFileName, report);
+			API_UNLOCK_RETURN_ERROR(ok && !NewErrorOccured, "CLA_SaveSequencerFirmware: error");
+		}
+
+		API_EXPORT ERROR_CODE_TYPE CLA_FNDEF(CopySequencerFirmwareToSDCard)(const unsigned int& Sequencer, const char* SDCardPath) {
+			API_LOCK_GUARD;
+			CDeviceSequencer* sequencer = GetSequencer(Sequencer);
+			if (!sequencer) {
+				API_UNLOCK_RETURN_ERROR(false, "CLA_CopySequencerFirmwareToSDCard: Invalid sequencer");
+			}
+			if (!SDCardPath) {
+				API_UNLOCK_RETURN_ERROR(false, "CLA_CopySequencerFirmwareToSDCard: no SD card path given");
+			}
+			std::string report;
+			bool ok = sequencer->CopyFirmwareToSDCard(SDCardPath, report);
+			API_UNLOCK_RETURN_ERROR(ok && !NewErrorOccured, "CLA_CopySequencerFirmwareToSDCard: error");
+		}
+
 		API_EXPORT ERROR_CODE_TYPE CLA_FNDEF(DiscoverSequencers)(char* result, size_t& length, double timeout_in_seconds) {
 			API_LOCK_GUARD;
 			std::vector<std::string> sequencers;

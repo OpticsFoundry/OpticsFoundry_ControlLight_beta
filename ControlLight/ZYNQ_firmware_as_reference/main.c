@@ -52,6 +52,7 @@
 #include "FireflyControl.h"
 #include "firmware_update.h"
 #include "sequencer_identity.h"
+#include "sd_installer.h"
 
 /* defined by each RAW mode application */
 void print_app_header();
@@ -288,8 +289,13 @@ The complete list is shown in "MicroZed ethernet lwIP BSP working vs not working
 #endif
 	print_app_header();
 
+	/* AXI GPIOs to the FPGA core (status LED, buzzer) */
+	FireflyControl_init_hardware();
+
 	/* board specific MAC address, derived from the QSPI flash unique ID */
 	FirmwareUpdate_init();
+	/* when booted from an installer SD card (BOOT.BIN + INSTALL file): copy BOOT.BIN into the QSPI flash */
+	SdInstaller_run_at_boot();
 	SequencerIdentity_get_mac(mac_ethernet_address);
 	xil_printf("MAC address %02X:%02X:%02X:%02X:%02X:%02X\r\n", mac_ethernet_address[0], mac_ethernet_address[1],
 			mac_ethernet_address[2], mac_ethernet_address[3], mac_ethernet_address[4], mac_ethernet_address[5]);

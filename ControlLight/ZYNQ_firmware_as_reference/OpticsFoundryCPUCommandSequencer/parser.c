@@ -55,6 +55,7 @@ static const char* parse_one_argument(const char* s, char* out, size_t max_len) 
         if (i < max_len - 1) out[i++] = *s;
         ++s;
     }
+    while ((i > 0) && isspace((unsigned char)out[i - 1])) i--;  //2026-11-26: "Foo " and "Foo" were different variable names
     if (*s == ':') {
         if (i < max_len - 1) out[i++] = ':';  //2026-11-26: was written unconditionally (one byte overflow)
         ++s;

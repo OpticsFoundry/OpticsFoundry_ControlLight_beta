@@ -116,6 +116,9 @@ public:
 
 	bool TransmitI2CPort(uint8_t I2C_port, uint8_t I2C_destination, uint8_t I2C_address, uint16_t send_length, uint8_t *send_data, uint16_t receive_length, uint8_t *receive_data, uint32_t I2C_clock_frequency_in_Hz, bool& I2C_success, bool fail_silently);
 	bool SetPSOptions(uint8_t options);
+	bool GetFirmwareInfo(std::string& info);
+	bool UpdateFirmware(const std::string& BootImageFileName, std::string& report);
+	bool Reboot();
 	void SetSequencerDigitalOut(uint8_t dig_out_pattern);
 	void SetSequencer_PL_to_PS_command(uint8_t PL_to_PS_command);
 	void SwitchSequencerBuzzer(bool OnOff);

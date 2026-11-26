@@ -381,6 +381,31 @@ namespace CLA { //optional, for C++ APIs, use namespace CLA, instead of precedin
 		/// @return See return convention above.
 		API_EXPORT ERROR_CODE_TYPE CLA_FN(SetPSOptions)(uint8_t options);
 
+		/// @brief Read a one-line description of the sequencer firmware: build date and time, boot mode (QSPI, SD card, JTAG) and QSPI flash ID.
+		/// Needs sequencer firmware from 2026-11-26 or later.
+		/// @param Sequencer the sequencer number.
+		/// @param info output buffer receiving the zero terminated description.
+		/// @param length input: size of info in bytes, output: length of the description (without terminating zero).
+		/// @return See return convention above.
+		API_EXPORT ERROR_CODE_TYPE CLA_FN(GetSequencerFirmwareInfo)(const unsigned int& Sequencer, char* info, size_t& length);
+
+		/// @brief Write a new firmware boot image (BOOT.BIN, as created by Vitis "Create Boot Image") over Ethernet into the QSPI flash of the sequencer.
+		/// The sequencer checks size, CRC32 and boot header, erases and programs the flash, and reads it back for verification. This takes about a minute.
+		/// The running firmware is not affected; the new firmware is used after the next boot from QSPI flash, see RebootSequencer.
+		/// Don't switch off the sequencer while this function runs. If the update fails, boot the sequencer from SD card or use JTAG to recover.
+		/// Needs sequencer firmware from 2026-11-26 or later.
+		/// @param Sequencer the sequencer number.
+		/// @param BootImageFileName path of the BOOT.BIN file.
+		/// @return See return convention above.
+		API_EXPORT ERROR_CODE_TYPE CLA_FN(UpdateSequencerFirmware)(const unsigned int& Sequencer, const char* BootImageFileName);
+
+		/// @brief Reboot the sequencer (software reset of processor and FPGA). It boots from the medium selected by its boot mode jumpers, which takes a few seconds.
+		/// Afterwards, the connection to this sequencer is closed. Call Cleanup and initialize the system again to continue working with it.
+		/// Needs sequencer firmware from 2026-11-26 or later.
+		/// @param Sequencer the sequencer number.
+		/// @return See return convention above.
+		API_EXPORT ERROR_CODE_TYPE CLA_FN(RebootSequencer)(const unsigned int& Sequencer);
+
 		/// @brief Write configuration data to the EEPROM of a rack slot.
 		/// @param SequencerID the sequencer to use.
 		/// @param RackNr the rack number.

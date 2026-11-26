@@ -296,6 +296,19 @@ PYBIND11_MODULE(control_light_api, m) {
         .def("switch_sequencer_buzzer", &ControlLight_API::SwitchSequencerBuzzer,
             py::arg("sequencer"), py::arg("on_off"))
 
+        // Sequencer firmware maintenance (needs sequencer firmware from 2026-11-26 on)
+        .def("get_sequencer_firmware_info", [](ControlLight_API& self, unsigned int sequencer) {
+                std::string info(512, '\0');
+                size_t length = info.size();
+                self.GetSequencerFirmwareInfo(sequencer, info.data(), length);
+                info.resize((length < info.size()) ? length : info.size() - 1);
+                return info;
+            }, py::arg("sequencer"))
+        .def("update_sequencer_firmware", [](ControlLight_API& self, unsigned int sequencer, const std::string& boot_image_filename) {
+                self.UpdateSequencerFirmware(sequencer, boot_image_filename.c_str());
+            }, py::arg("sequencer"), py::arg("boot_image_filename"))
+        .def("reboot_sequencer", &ControlLight_API::RebootSequencer, py::arg("sequencer"))
+
         // Ignores TCP/IP commands
         .def("sequencer_ignore_tcpip", &ControlLight_API::SequencerIgnoreTCPIP,
             py::arg("sequencer"), py::arg("on_off"))

@@ -30,6 +30,7 @@
 extern void RunEventLoop(); //defined in main.c
 
 #include "FireflyControl.h"
+#include "firmware_update.h"
 
 //I2C port
 #include "xiicps.h"
@@ -2432,6 +2433,13 @@ void FireflyControlLoop() {
 			FireflyControl_transmit_I2C();
 		} else if (strcmp(command,"set_PS_options") == 0) {
 			FireflyControl_set_PS_options();
+		} else if (strcmp(command,"get_firmware_info") == 0) {
+			FirmwareUpdate_send_firmware_info();
+		} else if (strcmp(command,"update_firmware_qspi") == 0) {
+			//the modify buffer is only used transiently by modify_sequence, so the loaded sequence stays intact
+			FirmwareUpdate_update_qspi((u8*)(DDR_MODIFY_BUFFER_START), DDR_MODIFY_BUFFER_LENGTH_IN_BYTES, Sequence_running);
+		} else if (strcmp(command,"reboot_system") == 0) {
+			FirmwareUpdate_reboot();
 		} else
 			if (DebugModeOn) xil_printf("Command not recognized (%s)\r\n", command);
 	}

@@ -1760,6 +1760,93 @@ bool CEthernetControllerFirefly::AttemptSetPSOptions(uint8_t options) {
 }
 
 
+//Firmware maintenance. Needs sequencer firmware from 2026-11-26 or later.
+//Older firmware answers "Ready" to these commands, but nothing else, which shows up here as a timeout.
+
+static uint32_t FirmwareCRC32(const uint8_t* data, uint32_t length) { //zlib / IEEE 802.3 CRC32, same as in sequencer firmware
+	static uint32_t table[256];
+	static bool table_ready = false;
+	if (!table_ready) {
+		for (uint32_t i = 0; i < 256; i++) {
+			uint32_t c = i;
+			for (int k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320u ^ (c >> 1)) : (c >> 1);
+			table[i] = c;
+		}
+		table_ready = true;
+	}
+	uint32_t crc = 0xFFFFFFFFu;
+	for (uint32_t i = 0; i < length; i++) crc = table[(crc ^ data[i]) & 0xFF] ^ (crc >> 8);
+	return crc ^ 0xFFFFFFFFu;
+}
+
+bool CEthernetControllerFirefly::GetFirmwareInfo(std::string& info) {
+	info = "";
+	if (!Connected) return false;
+	if (!Command("get_firmware_info")) return false;
+	CString answer;
+	if (!GetCommand(answer, /*timeout_in_seconds*/ 3)) {
+		AddErrorMessage("CEthernetControllerFirefly::GetFirmwareInfo : no answer. Sequencer firmware older than 2026-11-26 doesn't support this command.");
+		return false;
+	}
+	info = CStringToStdString(answer);
+	return true;
+}
+
+bool CEthernetControllerFirefly::UpdateFirmwareQSPI(const uint8_t* image, uint32_t size, std::string& report) {
+	//No automatic retries here: once the sequencer has started erasing the flash, the update must not be restarted halfway.
+	report = "";
+	if (!Connected) {
+		report = "not connected to sequencer";
+		return false;
+	}
+	const uint32_t crc = FirmwareCRC32(image, size);
+	if (!Command("update_firmware_qspi")) {
+		report = "sequencer didn't accept command update_firmware_qspi";
+		return false;
+	}
+	if (!WriteString(CString(std::to_string(size).c_str()))) return false;
+	if (!WriteString(CString(std::to_string(crc).c_str()))) return false;
+	CString answer;
+	if (!GetCommand(answer, /*timeout_in_seconds*/ 10)) {
+		report = "no answer from sequencer. Sequencer firmware older than 2026-11-26 doesn't support firmware updates over Ethernet.";
+		return false;
+	}
+	if (answer != "Ready") { //sequencer refused, e.g. because of wrong size or write protected flash
+		report = CStringToStdString(answer);
+		return false;
+	}
+	if (!SendData((uint8_t*)image, size, /*SendReady*/ false)) {
+		report = "error sending firmware image to sequencer";
+		return false;
+	}
+	//reception, CRC and boot header check
+	if (!GetCommand(answer, /*timeout_in_seconds*/ 120)) {
+		report = "sequencer didn't confirm reception of firmware image";
+		return false;
+	}
+	report = CStringToStdString(answer);
+	if (report.rfind("OK", 0) != 0) return false;
+	//erase, program, verify; typically 20..60 s for a 4.5 MB image
+	if (!GetCommand(answer, /*timeout_in_seconds*/ 600)) {
+		report += "\ntimeout while waiting for the result of QSPI flash programming. Don't power cycle the sequencer before checking its debug output on the USB COM port.";
+		return false;
+	}
+	report += "\n" + CStringToStdString(answer);
+	return (CStringToStdString(answer).rfind("OK", 0) == 0);
+}
+
+bool CEthernetControllerFirefly::RebootSystem() {
+	if (!Connected) return false;
+	if (!Command("reboot_system")) return false;
+	CString answer;
+	bool ok = GetCommand(answer, /*timeout_in_seconds*/ 3) && (answer == "OK rebooting");
+	if (!ok) AddErrorMessage("CEthernetControllerFirefly::RebootSystem : sequencer didn't confirm reboot. Sequencer firmware older than 2026-11-26 doesn't support this command.");
+	//the sequencer closes the connection and restarts; it can't be used before it has rebooted and the system has been initialized again
+	Connected = false;
+	return ok;
+}
+
+
 const unsigned int BusBitShift = 8;
 const unsigned int BusSequencerSpecialCommand = 0x7 << BusBitShift;
 

@@ -16,6 +16,8 @@ using namespace std;
 #include <string>
 using namespace std;
 #include <sstream>
+#include <fstream>
+#include <vector>
 
 #ifdef _DEBUG
 #undef THIS_FILE
@@ -559,6 +561,41 @@ bool CDeviceSequencer::TransmitI2CPort(uint8_t I2C_port, uint8_t I2C_destination
 
 bool CDeviceSequencer::SetPSOptions(uint8_t options) {
 	return MyEthernetMultiIOControllerFirefly->SetPSOptions(options);
+}
+
+bool CDeviceSequencer::GetFirmwareInfo(std::string& info) {
+	return MyEthernetMultiIOControllerFirefly->GetFirmwareInfo(info);
+}
+
+bool CDeviceSequencer::UpdateFirmware(const std::string& BootImageFileName, std::string& report) {
+	constexpr size_t MaxBootImageSize = 16 * 1024 * 1024; //limit of sequencer firmware (3-byte QSPI addressing, DDR receive buffer)
+	report = "";
+	std::ifstream file(BootImageFileName, std::ios::binary | std::ios::ate);
+	if (!file) {
+		report = "can't open boot image file " + BootImageFileName;
+		AddErrorMessage("CDeviceSequencer::UpdateFirmware : " + report);
+		return false;
+	}
+	const std::streamsize size = file.tellg();
+	if ((size <= 0) || (static_cast<size_t>(size) > MaxBootImageSize)) {
+		report = "boot image file " + BootImageFileName + " has invalid size " + std::to_string(size) + " bytes";
+		AddErrorMessage("CDeviceSequencer::UpdateFirmware : " + report);
+		return false;
+	}
+	std::vector<uint8_t> image(static_cast<size_t>(size));
+	file.seekg(0);
+	if (!file.read(reinterpret_cast<char*>(image.data()), size)) {
+		report = "error reading boot image file " + BootImageFileName;
+		AddErrorMessage("CDeviceSequencer::UpdateFirmware : " + report);
+		return false;
+	}
+	bool ok = MyEthernetMultiIOControllerFirefly->UpdateFirmwareQSPI(image.data(), static_cast<uint32_t>(image.size()), report);
+	if (!ok) AddErrorMessage("CDeviceSequencer::UpdateFirmware : firmware update failed:\n" + report);
+	return ok;
+}
+
+bool CDeviceSequencer::Reboot() {
+	return MyEthernetMultiIOControllerFirefly->RebootSystem();
 }
 
 void CDeviceSequencer::SetSequencerDigitalOut(uint8_t dig_out_pattern) {

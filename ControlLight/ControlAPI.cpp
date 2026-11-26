@@ -1338,6 +1338,46 @@ bool CLA_InitializeMFC(bool InitializeAfx, bool InitializeAfxSocket) {
 			API_UNLOCK_RETURN_ERROR(!NewErrorOccured, "SetPSOptions: error");
 		}
 
+		API_EXPORT ERROR_CODE_TYPE CLA_FNDEF(GetSequencerFirmwareInfo)(const unsigned int& Sequencer, char* info, size_t& length) {
+			API_LOCK_GUARD;
+			CDeviceSequencer* sequencer = GetSequencer(Sequencer);
+			if (!sequencer) {
+				API_UNLOCK_RETURN_ERROR(false, "CLA_GetSequencerFirmwareInfo: Invalid sequencer");
+			}
+			std::string text;
+			bool ok = sequencer->GetFirmwareInfo(text);
+			if (info && (length > 0)) {
+				size_t copied = text.copy(info, (text.size() < length - 1) ? text.size() : length - 1);
+				info[copied] = 0;
+			}
+			length = text.size();
+			API_UNLOCK_RETURN_ERROR(ok && !NewErrorOccured, "CLA_GetSequencerFirmwareInfo: error");
+		}
+
+		API_EXPORT ERROR_CODE_TYPE CLA_FNDEF(UpdateSequencerFirmware)(const unsigned int& Sequencer, const char* BootImageFileName) {
+			API_LOCK_GUARD;
+			CDeviceSequencer* sequencer = GetSequencer(Sequencer);
+			if (!sequencer) {
+				API_UNLOCK_RETURN_ERROR(false, "CLA_UpdateSequencerFirmware: Invalid sequencer");
+			}
+			if (!BootImageFileName) {
+				API_UNLOCK_RETURN_ERROR(false, "CLA_UpdateSequencerFirmware: no boot image file name given");
+			}
+			std::string report;
+			bool ok = sequencer->UpdateFirmware(BootImageFileName, report);
+			API_UNLOCK_RETURN_ERROR(ok && !NewErrorOccured, "CLA_UpdateSequencerFirmware: error");
+		}
+
+		API_EXPORT ERROR_CODE_TYPE CLA_FNDEF(RebootSequencer)(const unsigned int& Sequencer) {
+			API_LOCK_GUARD;
+			CDeviceSequencer* sequencer = GetSequencer(Sequencer);
+			if (!sequencer) {
+				API_UNLOCK_RETURN_ERROR(false, "CLA_RebootSequencer: Invalid sequencer");
+			}
+			bool ok = sequencer->Reboot();
+			API_UNLOCK_RETURN_ERROR(ok && !NewErrorOccured, "CLA_RebootSequencer: error");
+		}
+
 		API_EXPORT ERROR_CODE_TYPE CLA_FNDEF(WriteConfigEEPROM)(uint8_t SequencerID, uint8_t RackNr, uint8_t SlotNr, const char* data, size_t length) {
 			API_LOCK_GUARD;
 			if (!MasterSequencer) {

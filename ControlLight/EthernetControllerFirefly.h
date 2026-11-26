@@ -116,6 +116,11 @@ public:
 	bool TransmitI2CPort(uint8_t I2C_port, uint8_t I2C_destination, uint8_t I2C_address, uint16_t send_length, uint8_t *send_data, uint16_t receive_length, uint8_t *receive_data, uint32_t I2C_clock_frequency_in_Hz, bool& I2C_success, bool fail_silently);
 	bool SetPSOptions(uint8_t options);
 
+	//firmware maintenance (sequencer firmware from 2026-11-26 on)
+	bool GetFirmwareInfo(std::string& info);
+	bool UpdateFirmwareQSPI(const uint8_t* image, uint32_t size, std::string& report);
+	bool RebootSystem();
+
 	void DebugBuffer(const std::string& filename);
 	void AddSequencerCommandToBuffer(uint32_t* buffer, uint32_t n, uint32_t high_buffer, uint32_t low_buffer);
 	void ClearSequencerCommandList();

@@ -221,7 +221,10 @@ PYBIND11_MODULE(control_light_api, m) {
         .def("execute_sequence", &ControlLight_API::ExecuteSequence, py::arg("filename") = "")
 
         .def("repeat_sequence", &ControlLight_API::RepeatSequence)
-        .def("wait_till_end_of_sequence", &ControlLight_API::WaitTillEndOfSequence, py::arg("timeout_in_s") = 0)
+        // releases the GIL while waiting, so that another Python thread can call interrupt_wait_till_end_of_sequence
+        .def("wait_till_end_of_sequence", &ControlLight_API::WaitTillEndOfSequence, py::arg("timeout_in_s") = 0, py::call_guard<py::gil_scoped_release>())
+        // may be called from another thread while wait_till_end_of_sequence(_then_get_input_data) is waiting
+        .def("interrupt_wait_till_end_of_sequence", &ControlLight_API::InterruptWaitTillEndOfSequence, py::arg("stop_sequence") = true)
 
         // Checks sequence execution status: returns (running, data_points_written)
         .def("get_sequence_execution_status", [](ControlLight_API& self) {
@@ -238,7 +241,10 @@ PYBIND11_MODULE(control_light_api, m) {
                 unsigned long buffer_length = 0;
                 unsigned long end_time = 0;
 
-                self.WaitTillEndOfSequenceThenGetInputData(internal_ptr, buffer_length, end_time, timeout_in_s);
+                {
+                    py::gil_scoped_release release;  //so that another Python thread can call interrupt_wait_till_end_of_sequence
+                    self.WaitTillEndOfSequenceThenGetInputData(internal_ptr, buffer_length, end_time, timeout_in_s);
+                }
 
                 // Copy the buffer to Python bytes object
                 py::bytes data = (internal_ptr && buffer_length)

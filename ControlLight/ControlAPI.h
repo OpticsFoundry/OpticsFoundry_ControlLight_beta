@@ -743,7 +743,16 @@ namespace CLA { //optional, for C++ APIs, use namespace CLA, instead of precedin
 		/// @param EndTimeOfCycle returns the end time of the cycle in ms.
 		/// @param timeout_in_s timeout in seconds. If timeout_in_s > 0.001 and the sequence is not finished within this time, the function returns false or throws an exception (depending on mode selected mode when compiling API).
 		API_EXPORT ERROR_CODE_TYPE CLA_FN(WaitTillEndOfSequenceThenGetInputData)(uint8_t*& buffer, unsigned long& buffer_length, unsigned  long& EndTimeOfCycle, double timeout_in_s);
-		
+
+		/// @brief Interrupts CLA_WaitTillEndOfSequence or CLA_WaitTillEndOfSequenceThenGetInputData, which another thread is executing.
+		/// This is the only API function that may be called while another thread executes an API function. The interrupted wait
+		/// function returns an error ("interrupted by CLA_InterruptWaitTillEndOfSequence") within about 100 ms, without showing a message box.
+		/// Does nothing if no wait is in progress. Needs sequencer firmware from 2026-11-27 on; older firmware ignores it.
+		/// @param StopSequence true: also stop the sequence. false: the sequence continues. An interrupted
+		/// CLA_WaitTillEndOfSequenceThenGetInputData always stops the sequence.
+		/// @return See return convention above.
+		API_EXPORT ERROR_CODE_TYPE CLA_FN(InterruptWaitTillEndOfSequence)(bool StopSequence = true);
+
 		/// @brief Sets a guard time. If sequencer commands make the time advance more than the guard time beyond what's allowed by Wait_ms, an error will be recorded (check with DidErrorOccur() if that happened) or thrown.
 		/// @param MaxTimeDebt_in_ms maximum time debt in ms. If the sequencer commands make the time advance more than this, the sequencer will stop and wait for the next command.
 		/// @return See return convention above.

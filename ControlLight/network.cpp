@@ -411,6 +411,40 @@ bool CNetwork::FlushInputBuffer()
 	return true;
 }
 
+bool CNetwork::SendDataFromOtherThread(const uint8_t* Data, unsigned long Size, unsigned long timeout_ms) {
+	if (!m_pSocket) return false;  //no reconnect here: that must happen in the owner thread
+#ifdef WIN32
+	SOCKET s = m_pSocket->m_hSocket;
+	if (s == INVALID_SOCKET) return false;
+#else
+	int s = m_socketfd;
+	if (s < 0) return false;
+#endif
+	auto start = std::chrono::steady_clock::now();
+	unsigned long totalSent = 0;
+	while (totalSent < Size) {
+#ifdef WIN32
+		int sent = ::send(s, (const char*)(Data + totalSent), (int)(Size - totalSent), 0);
+		if (sent == SOCKET_ERROR) {
+			if (WSAGetLastError() != WSAEWOULDBLOCK) return false;  //MFC sockets are non-blocking
+			sent = 0;
+		}
+#else
+		ssize_t sent = ::send(s, Data + totalSent, Size - totalSent, MSG_NOSIGNAL);
+		if (sent < 0) {
+			if ((errno != EAGAIN) && (errno != EWOULDBLOCK)) return false;
+			sent = 0;
+		}
+#endif
+		totalSent += (unsigned long)sent;
+		if (totalSent < Size) {
+			if (std::chrono::steady_clock::now() - start > std::chrono::milliseconds(timeout_ms)) return false;
+			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+		}
+	}
+	return true;
+}
+
 bool CNetwork::WaitForWrite(unsigned long timeout_ms) {
 	if (!m_pSocket)	Reconnect(/*maxRetries*/ 0,/*timeout_s*/1,/*delay_ms*/0);
 	if (!m_pSocket) return false;

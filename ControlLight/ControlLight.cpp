@@ -1107,6 +1107,44 @@ void DemoFPGASequencerSoundBuzzer() {
 }
 
 
+void DemoInterruptWaitTillEndOfSequence() {
+	//Shows how another thread (e.g. the "Stop" button of a user interface) interrupts CLA_WaitTillEndOfSequence.
+	//Needs sequencer firmware from 2026-11-27 on.
+	if (!InitializeSystem()) {
+		return;
+	}
+	for (bool StopSequence : {true, false}) {
+		//a 10 s long sequence: beep, 10 s pause, beep
+		CLA_StartAssemblingSequence();
+		CLA_SwitchSequencerBuzzer(/*SequencerNr*/ 0, true);
+		CLA_Wait_ms(50);
+		CLA_SwitchSequencerBuzzer(/*SequencerNr*/ 0, false);
+		for (int n = 0; n < 100; n++) CLA_Wait_ms(100);
+		CLA_SwitchSequencerBuzzer(/*SequencerNr*/ 0, true);
+		CLA_Wait_ms(50);
+		CLA_SwitchSequencerBuzzer(/*SequencerNr*/ 0, false);
+		CLA_ExecuteSequence();
+		auto start = std::chrono::steady_clock::now();
+		auto elapsed_s = [&start]() { return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count(); };
+		std::thread interrupter([StopSequence]() {
+			std::this_thread::sleep_for(std::chrono::seconds(1));
+			CLA_InterruptWaitTillEndOfSequence(StopSequence);
+		});
+		bool finished = CLA_WaitTillEndOfSequence(/*timeout_in_s*/ 20);
+		interrupter.join();
+		cout << "Interrupt with StopSequence = " << StopSequence << ": wait returned after " << elapsed_s() << " s, "
+			<< (finished ? "sequence finished" : CLA_GetLastError()) << endl;
+		bool running = false;
+		unsigned long long DataPointsWritten = 0;
+		CLA_GetSequenceExecutionStatus(running, DataPointsWritten);
+		cout << "  sequence " << (running ? "still running" : "not running") << endl;
+		if (running) {
+			finished = CLA_WaitTillEndOfSequence(/*timeout_in_s*/ 20);
+			cout << "  second wait: " << (finished ? "sequence finished" : CLA_GetLastError()) << " after " << elapsed_s() << " s" << endl;
+		}
+	}
+}
+
 void DemoSmartSequencer() {
 	//Demonstration of the command interpreter available on the ZYNQ Sequencer.
 	//We implement a simple and slow VCO.
@@ -1544,6 +1582,7 @@ int main() {
 	//DemoSequencerFirmwareInfo();       //Shows build date, boot mode and QSPI flash ID of the sequencer firmware
 	//DemoUpdateSequencerFirmware();     //Writes a new firmware boot image over Ethernet into the sequencer's QSPI flash and reboots the sequencer
 	//DemoCopySequencerFirmwareToSDCard(); //Creates an installer SD card with the sequencer's firmware, to set up another Z-turn board
+	//DemoInterruptWaitTillEndOfSequence(); //Interrupts CLA_WaitTillEndOfSequence from another thread, as a "Stop" button would
 	
 	//Unfinished demos:
 	//DemoDDSVCO();                      //Unfinished demo of the fast digital VCO capability of the sequencer.

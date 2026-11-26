@@ -58,6 +58,7 @@
 //typedef unsigned char bool;
 #include <stdbool.h>
 #include "sequencer_identity.h"
+#include "FireflyControl.h"
 
 extern bool DebugModeOn;
 extern void RunEventLoop(); //defined in main.c
@@ -114,6 +115,7 @@ static void ResetReceiveState(void) {
 	BinaryBufferReceivedInBytes = 0;
 	BinaryBufferExpectedInBytes = 0;
 	Digital_data_successfully_received = 0;
+	FireflyControl_reset_wait_commands();  /* queued wait commands are gone */
 }
 
 void server_clear(u32* a_buffer, u32 a_length){
@@ -228,12 +230,23 @@ static u32 ProcessBinaryData(const u8* data, u32 length) {
 extern void CS_StopExecution(void);      /* OpticsFoundryCPUCommandSequencer */
 extern void CS_InterruptExecution(void);
 
-/* Commands that must act while a CPU command sequence is executing. FireflyControlLoop doesn't dispatch
- * commands then, so previously a running CPU command sequence couldn't be stopped. These commands are
- * also queued normally; executing them a second time is harmless. */
-static void HandleUrgentCommand(const char* command) {
-	if ((strcmp(command, "cs_stop_sequence") == 0) || (strcmp(command, "cs_stop_sequence0") == 0)) CS_StopExecution();
-	else if ((strcmp(command, "cs_interrupt_sequence") == 0) || (strcmp(command, "cs_interrupt_sequence0") == 0)) CS_InterruptExecution();
+static bool IsCommand(const char* received, const char* command) {  /* also accepts the variant with '0' appended (no "Ready" answer) */
+	size_t length = strlen(command);
+	return (strncmp(received, command, length) == 0) && ((received[length] == 0) || ((received[length] == '0') && (received[length+1] == 0)));
+}
+
+/* Commands that must act while the firmware is busy (executing a CPU command sequence, or waiting for the end of a
+ * sequence). FireflyControlLoop doesn't dispatch commands then, so previously these couldn't be stopped.
+ * cs_stop_sequence and cs_interrupt_sequence are also queued normally; executing them a second time is harmless.
+ * interrupt_wait and interrupt_wait_and_stop (2026-11-27) only act here and are not queued, so they never get an answer
+ * that the waiting PC would misinterpret. Returns true if the command must not be queued. */
+static bool HandleUrgentCommand(const char* command) {
+	if (IsCommand(command, "cs_stop_sequence")) CS_StopExecution();
+	else if (IsCommand(command, "cs_interrupt_sequence")) CS_InterruptExecution();  /* also ends WaitTillSequenceFinished in the CPU command sequence */
+	else if (IsCommand(command, "interrupt_wait")) { FireflyControl_request_wait_interrupt(/*stop_sequence*/ false); return true; }
+	else if (IsCommand(command, "interrupt_wait_and_stop")) { FireflyControl_request_wait_interrupt(/*stop_sequence*/ true); return true; }
+	else if (IsCommand(command, "wait_till_finished") || IsCommand(command, "wait_till_end_of_sequence_then_get_input_data")) FireflyControl_wait_command_received();
+	return false;
 }
 
 /* ASCII mode: split data into '\n' terminated commands */
@@ -246,10 +259,11 @@ static void ProcessAsciiData(const u8* data, u32 length) {
 			} else {
 				CommandBuffer[NextEmptyCommandBufferNumber*MaxCommandLength + WritePositionInNextEmptyCommandBuffer] = 0; //terminate string with 0
 				if (DebugModeOn) xil_printf("server_recv_callback: received %s\r\n",(char *)(&(CommandBuffer[NextEmptyCommandBufferNumber*MaxCommandLength])));
-				HandleUrgentCommand((const char *)(&(CommandBuffer[NextEmptyCommandBufferNumber*MaxCommandLength])));
-				NumberCommandsInBuffer++;
-				NextEmptyCommandBufferNumber++;
-				if (NextEmptyCommandBufferNumber >= MaxCommandBuffer) NextEmptyCommandBufferNumber = 0;
+				if (!HandleUrgentCommand((const char *)(&(CommandBuffer[NextEmptyCommandBufferNumber*MaxCommandLength])))) {
+					NumberCommandsInBuffer++;
+					NextEmptyCommandBufferNumber++;
+					if (NextEmptyCommandBufferNumber >= MaxCommandBuffer) NextEmptyCommandBufferNumber = 0;
+				}
 			}
 			WritePositionInNextEmptyCommandBuffer = 0;
 			DiscardCurrentCommand = false;

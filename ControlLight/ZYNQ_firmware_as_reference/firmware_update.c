@@ -357,7 +357,7 @@ void FirmwareUpdate_send_firmware_info(void) {
 	FirmwareUpdate_describe(firmware, sizeof(firmware));
 	SequencerIdentity_describe(identity, sizeof(identity));
 	SdInstaller_describe(sd_install, sizeof(sd_install));
-	SendLine("OpticsFoundry Z-turn sequencer firmware; %s; %s%s; supports update_firmware_qspi, update_backup_firmware_qspi, test_backup_boot, install_from_sd, reboot_system, discovery",
+	SendLine("OpticsFoundry Z-turn sequencer firmware; %s; %s%s; supports update_firmware_qspi, update_backup_firmware_qspi, test_backup_boot, install_from_sd, read_firmware_image, reboot_system, discovery, interrupt_wait",
 			firmware, identity, sd_install);
 }
 

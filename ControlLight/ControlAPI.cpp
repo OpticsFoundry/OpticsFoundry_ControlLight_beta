@@ -363,6 +363,19 @@ bool CLA_InitializeMFC(bool InitializeAfx, bool InitializeAfxSocket) {
 
 #endif
 
+//A wait interrupted with CLA_InterruptWaitTillEndOfSequence is reported as an error (false, or an exception), but without
+//showing a message box, since the interrupt was intended.
+#ifdef THROW_EXCEPTIONS
+#define API_UNLOCK_RETURN_INTERRUPTED(message) \
+    API_UNLOCK; \
+    AddErrorMessage(message, /*dothrow*/ false); \
+    throw CLA_Exception(message);
+#else
+#define API_UNLOCK_RETURN_INTERRUPTED(message) \
+    API_UNLOCK; \
+    return AddErrorMessage(message, /*dothrow*/ false);
+#endif
+
 
 		
 
@@ -565,6 +578,9 @@ bool CLA_InitializeMFC(bool InitializeAfx, bool InitializeAfxSocket) {
 			API_LOCK_GUARD;
 			if (MasterSequencer) {
 				bool ret = MasterSequencer->WaitTillEndOfSequence(timeout_in_s);
+				if (!ret && MasterSequencer->WaitWasInterrupted()) {
+					API_UNLOCK_RETURN_INTERRUPTED("CLA_WaitTillEndOfSequence: interrupted by CLA_InterruptWaitTillEndOfSequence");
+				}
 				API_UNLOCK_RETURN_ERROR(ret, "CLA_WaitTillEndOfSequence error: Master sequencer error.");
 			}
 			else {
@@ -596,6 +612,9 @@ bool CLA_InitializeMFC(bool InitializeAfx, bool InitializeAfxSocket) {
 			//MasterSequencer is initialized to zero at program start, so no need to check if it is initialized
 			if (MasterSequencer) {
 				bool ret = MasterSequencer->WaitTillEndOfSequenceThenGetInputData(buffer, buffer_length, EndTimeOfCycle, timeout_in_s);
+				if (!ret && MasterSequencer->WaitWasInterrupted()) {
+					API_UNLOCK_RETURN_INTERRUPTED("CLA_WaitTillEndOfSequenceThenGetInputData: interrupted by CLA_InterruptWaitTillEndOfSequence (sequence stopped)");
+				}
 				API_UNLOCK_RETURN_ERROR(ret, "CLA_WaitTillEndOfSequenceThenGetInputData error: Master sequencer error.");
 			}
 			else
@@ -605,6 +624,20 @@ bool CLA_InitializeMFC(bool InitializeAfx, bool InitializeAfxSocket) {
 				EndTimeOfCycle = 0;
 				API_UNLOCK_RETURN_ERROR(false, "CLA_WaitTillEndOfSequenceThenGetInputData error: No master sequencer defined.");
 			}
+			CATCH_MFC_EX_E
+		}
+
+		API_EXPORT ERROR_CODE_TYPE CLA_FNDEF(InterruptWaitTillEndOfSequence)(bool StopSequence) {
+			//No API_LOCK_GUARD and no change of the shared error state on success: this function is called from another thread
+			//while CLA_WaitTillEndOfSequence or CLA_WaitTillEndOfSequenceThenGetInputData is executing.
+			CATCH_MFC_EX_S
+			bool ok = (MasterSequencer != nullptr) && MasterSequencer->InterruptWait(StopSequence);
+#ifdef THROW_EXCEPTIONS
+			if (!ok) throw CLA_Exception("CLA_InterruptWaitTillEndOfSequence: no master sequencer, or sending the interrupt failed");
+			return;
+#else
+			return ok ? true : AddErrorMessage("CLA_InterruptWaitTillEndOfSequence: no master sequencer, or sending the interrupt failed");
+#endif
 			CATCH_MFC_EX_E
 		}
 

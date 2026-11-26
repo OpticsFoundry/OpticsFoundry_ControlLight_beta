@@ -2317,23 +2317,41 @@ bool CEthernetControllerFirefly::CheckReady(double timeout_in_seconds) {
 
 bool CEthernetControllerFirefly::WaitTillEndOfSequence(double timeout_in_s) {
 	if (!Connected) return false;
+	WaitInterrupted = false;
 	unsigned int attempts = 0;
 	while ((attempts < MaxReconnectAttempts) && (!AttemptWaitTillEndOfSequence(timeout_in_s))) {
 		Network->ResetConnection();
 		this_thread::sleep_for(100ms);
 		attempts++;
 	}
-	return (attempts < MaxReconnectAttempts);
+	return (attempts < MaxReconnectAttempts) && !WaitInterrupted;
 }
 
+void CEthernetControllerFirefly::SetWaitInProgress(bool InProgress) {
+	std::lock_guard<std::mutex> lock(WaitStateMutex);
+	WaitInProgress = InProgress;
+}
 
+bool CEthernetControllerFirefly::InterruptWait(bool StopSequence) {
+	//Called from another thread. The lock guarantees that the owner thread is blocked waiting for the answer to a wait command
+	//while we send, so the line can't end up in the middle of another command. Sending a command that ends with '0' suppresses
+	//the "Ready" answer, so that older firmware, which doesn't know the command, ignores it without answering.
+	std::lock_guard<std::mutex> lock(WaitStateMutex);
+	if (!WaitInProgress) return true;  //nothing to interrupt
+	const char* line = StopSequence ? "interrupt_wait_and_stop0\n" : "interrupt_wait0\n";
+	return Network->SendDataFromOtherThread((const uint8_t*)line, (unsigned long)strlen(line));
+}
 
 bool CEthernetControllerFirefly::AttemptWaitTillEndOfSequence(double timeout_in_s) {
 	if (!Command("wait_till_finished")) return false;
 	WriteDouble(timeout_in_s);//sequence timeout, <0.001 means no timeout
 	int Success;
-	if (!ReadInt(Success, timeout_in_s + 5)) return false;
+	SetWaitInProgress(true);
+	bool ok = ReadInt(Success, timeout_in_s + 5);
+	SetWaitInProgress(false);
+	if (!ok) return false;
 	if (Success == 0) AddErrorMessage("CEthernetControllerFirefly::AttemptWaitTillEndOfSequence : timeout : sequence execution took too long.");
+	else if (Success == 2) WaitInterrupted = true;  //interrupted with InterruptWait (firmware from 2026-11-27 on)
 	return true;
 }
 
@@ -2341,13 +2359,14 @@ bool CEthernetControllerFirefly::AttemptWaitTillEndOfSequence(double timeout_in_
 
 bool CEthernetControllerFirefly::WaitTillEndOfSequenceThenGetInputData(uint8_t*& buffer, unsigned long& buffer_length, unsigned  long& EndTimeOfCycle, double timeout_in_s) {
 	if (!Connected) return false;
+	WaitInterrupted = false;
 	unsigned int attempts = 0;
 	while ((attempts < MaxReconnectAttempts) && (!AttemptWaitTillEndOfSequenceThenGetInputData(buffer, buffer_length, EndTimeOfCycle, timeout_in_s))) {
 		Network->ResetConnection();
 		this_thread::sleep_for(100ms);
 		attempts++;
 	}
-	return (attempts < MaxReconnectAttempts);
+	return (attempts < MaxReconnectAttempts) && !WaitInterrupted;
 }
 
 bool CEthernetControllerFirefly::AttemptWaitTillEndOfSequenceThenGetInputData(uint8_t * &buffer, unsigned long & buffer_length, unsigned  long& EndTimeOfCycle, double timeout_in_s) {
@@ -2367,8 +2386,12 @@ bool CEthernetControllerFirefly::AttemptWaitTillEndOfSequenceThenGetInputData(ui
 	WriteDouble(timeout_in_s);//read input data timeout, <0.001 means no timeout
 
 	int Success;
-	if (!ReadInt(Success, timeout_in_s + 5)) return false;
+	SetWaitInProgress(true);
+	bool ok = ReadInt(Success, timeout_in_s + 5);
+	SetWaitInProgress(false);
+	if (!ok) return false;
 	if (Success == 0) AddErrorMessage("CEthernetControllerFirefly::AttemptWaitTillEndOfSequenceThenGetInputData : timeout : sequence execution took too long.");
+	else if (Success == 2) WaitInterrupted = true;  //interrupted with InterruptWait; the firmware stopped the sequence and sends the input data recorded so far
 
 	int PeriodicTriggerError;
 	if (!ReadInt(PeriodicTriggerError, 1)) return false;

@@ -2277,7 +2277,40 @@ bool WaitForInputBufferTransferEnd(double timeout_in_sec) {
 	return true;
 }
 
-bool FireflyControl_wait_till_finished(double timeout_in_sec) {
+/* Interrupting a wait for the end of the sequence from the PC (2026-11-27).
+ * echo.c counts the wait commands (wait_till_finished, wait_till_end_of_sequence_then_get_input_data) when they are received,
+ * and handles the urgent commands interrupt_wait and interrupt_wait_and_stop directly when they are received, without queuing
+ * them. An interrupt request only counts if a wait command is running or still pending, so that a request that arrives just
+ * after a wait ended can't interrupt a later wait. */
+static volatile u32 PendingWaitCommands = 0;
+static volatile u8 WaitInterruptRequest = 0;  //0: none, 1: interrupt the wait, 2: also stop the sequence
+
+void FireflyControl_wait_command_received(void) {
+	PendingWaitCommands++;
+}
+
+void FireflyControl_reset_wait_commands(void) {
+	PendingWaitCommands = 0;
+	WaitInterruptRequest = 0;
+}
+
+void FireflyControl_request_wait_interrupt(bool stop_sequence) {
+	if (PendingWaitCommands == 0) return;  //no wait running or pending: nothing to interrupt
+	u8 request = stop_sequence ? 2 : 1;
+	if (request > WaitInterruptRequest) WaitInterruptRequest = request;
+}
+
+static void WaitCommandDone(void) {
+	if (PendingWaitCommands > 0) PendingWaitCommands--;
+	if (PendingWaitCommands == 0) WaitInterruptRequest = 0;
+}
+
+typedef enum { WAIT_FINISHED, WAIT_TIMED_OUT, WAIT_INTERRUPTED } WaitResult;
+
+/* Waits for the end of the sequence. Returns WAIT_INTERRUPTED if the PC sent interrupt_wait (the sequence continues) or
+ * interrupt_wait_and_stop (the sequence is stopped), or, with in_cpu_command_sequence, if the CPU command sequence was
+ * interrupted (cs_interrupt_sequence; the FPGA sequence continues). */
+static WaitResult WaitTillFinished(double timeout_in_sec, bool in_cpu_command_sequence, bool always_stop_on_interrupt) {
 	u32 LastNextDMA0Transfer = NextDMA0Transfer;
 	XTime tStart;
 	XTime_GetTime(&tStart);
@@ -2292,6 +2325,21 @@ bool FireflyControl_wait_till_finished(double timeout_in_sec) {
 			CheckInputMemBufferReadout(/* LastTransfer */ FALSE);
 			CheckForPLToPSCommand();
 		} else FireflyControl_service_network_every(FAST_MODE_NETWORK_SERVICE_PERIOD_MS); //2026-11-27: fast mode didn't service the network at all
+		if ((!in_cpu_command_sequence) && (WaitInterruptRequest != 0)) {
+			bool stop = always_stop_on_interrupt || (WaitInterruptRequest == 2);
+			WaitInterruptRequest = 0;
+			xil_printf("\r\nWait for the end of the sequence interrupted by the PC%s\r\n", stop ? "; sequence stopped" : "");
+			if (stop) {
+				FireflyControl_reset();
+				IgnoreTCPIP = FALSE;
+			}
+			FireflyControl_print_statistics();
+			return WAIT_INTERRUPTED;
+		}
+		if (in_cpu_command_sequence && (!CS_ExecutionIsRunning())) {
+			xil_printf("\r\nWait for the end of the sequence interrupted (cs_interrupt_sequence)\r\n");
+			return WAIT_INTERRUPTED;
+		}
 		if (DebugModeOn) PrintSequenceStatusRegularly();
 		//sleep(0.5);
 		if (LastNextDMA0Transfer != NextDMA0Transfer){
@@ -2306,7 +2354,7 @@ bool FireflyControl_wait_till_finished(double timeout_in_sec) {
 				if (DebugModeOn) xil_printf("\r\nFireflyControl_wait_till_finished timed out after %f s\r\n",timeout_in_sec);
 				StopSequenceOnError(11);
 				FireflyControl_print_statistics();
-				return false;
+				return WAIT_TIMED_OUT;
 			}
 		}
 	}
@@ -2316,7 +2364,25 @@ bool FireflyControl_wait_till_finished(double timeout_in_sec) {
 	Sequence_running = FALSE;
 	IgnoreTCPIP = FALSE;
 	FireflyControl_print_statistics();
-	return true;
+	return WAIT_FINISHED;
+}
+
+bool FireflyControl_wait_till_finished(double timeout_in_sec) {
+	return WaitTillFinished(timeout_in_sec, /*in_cpu_command_sequence*/ false, /*always_stop_on_interrupt*/ false) == WAIT_FINISHED;
+}
+
+//WaitTillSequenceFinished in a CPU command sequence; returns false if the wait was interrupted with cs_interrupt_sequence
+bool FireflyControl_wait_till_finished_in_cpu_command_sequence(double timeout_in_sec) {
+	return WaitTillFinished(timeout_in_sec, /*in_cpu_command_sequence*/ true, /*always_stop_on_interrupt*/ false) != WAIT_INTERRUPTED;
+}
+
+//answer to the PC: "1" finished, "0" timed out (sequence stopped), "2" interrupted by the PC (since 2026-11-27)
+static const char* WaitResultAnswer(WaitResult result) {
+	switch (result) {
+		case WAIT_FINISHED: return "1\n";
+		case WAIT_INTERRUPTED: return "2\n";
+		default: return "0\n";
+	}
 }
 
 /* Development test commands (test1, test2, test_timer, adc). They overwrite the loaded sequence, switch the clock or block
@@ -2488,8 +2554,9 @@ void FireflyControlLoop() {
 			server_send_ascii((GetWarningMissedPeriodicTrigger()) ? "1\n" : "0\n");
 		} else if (strcmp(command,"wait_till_finished") == 0) {
 			double timeout = server_read_double();
-			bool success = FireflyControl_wait_till_finished(timeout);
-			server_send_ascii((success) ? "1\n" : "0\n"); //send 0 if timed out
+			WaitResult result = WaitTillFinished(timeout, /*in_cpu_command_sequence*/ false, /*always_stop_on_interrupt*/ false);
+			WaitCommandDone();
+			server_send_ascii((char*)WaitResultAnswer(result)); //"1" finished, "0" timed out, "2" interrupted
 		} else if (strcmp(command,"get_current_waveform_point") == 0) {
 			FireflyControl_get_current_waveform_point();
 		} else if (strcmp(command,"get_sequence_number") == 0) {
@@ -2505,8 +2572,11 @@ void FireflyControlLoop() {
 		} else if (strcmp(command,"wait_till_end_of_sequence_then_get_input_data") == 0) {
 			double sequence_timeout = server_read_double();
 			double input_timeout = server_read_double();
-			bool success = FireflyControl_wait_till_finished(sequence_timeout);
-			server_send_ascii((success) ? "1\n" : "0\n"); //send 0 if timed out
+			//an interrupted wait always stops the sequence here, so that the input data can be read out consistently
+			WaitResult result = WaitTillFinished(sequence_timeout, /*in_cpu_command_sequence*/ false, /*always_stop_on_interrupt*/ true);
+			WaitCommandDone();
+			bool success;
+			server_send_ascii((char*)WaitResultAnswer(result)); //"1" finished, "0" timed out, "2" interrupted (sequence stopped)
 			if (DebugModeOn) xil_printf("Checking input buffer\n\r");
 			CheckInputMemBufferReadout(/* LastTransfer */ TRUE);
 			if (DebugModeOn) xil_printf("sending missed period trigger warning\n\r");

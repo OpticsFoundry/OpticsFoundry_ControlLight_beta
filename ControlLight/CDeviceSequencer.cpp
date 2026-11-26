@@ -475,6 +475,17 @@ bool CDeviceSequencer::WaitTillEndOfSequence(double timeout_in_s) {
 	return false;
 }
 
+bool CDeviceSequencer::InterruptWait(bool StopSequence) {
+	if (master && MyEthernetMultiIOControllerFirefly) {
+		return MyEthernetMultiIOControllerFirefly->InterruptWait(StopSequence);
+	}
+	return false;
+}
+
+bool CDeviceSequencer::WaitWasInterrupted() {
+	return master && MyEthernetMultiIOControllerFirefly && MyEthernetMultiIOControllerFirefly->LastWaitInterrupted();
+}
+
 bool CDeviceSequencer::WaitTillEndOfSequenceThenGetInputData(uint8_t*& buffer, unsigned long& buffer_length, unsigned long& EndTimeOfCycle, double timeout_in_s) {
 	if (master) {
 		return MyEthernetMultiIOControllerFirefly->WaitTillEndOfSequenceThenGetInputData(buffer, buffer_length, EndTimeOfCycle, timeout_in_s);

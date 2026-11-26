@@ -84,6 +84,8 @@ public:
 	bool IsSequenceRunning(bool& running, unsigned long long& DataPointsWritten);
 	bool WaitTillEndOfSequence(double timeout_in_s = 0);
 	bool WaitTillEndOfSequenceThenGetInputData(uint8_t*& buffer, unsigned long& buffer_length, unsigned long& EndTimeOfCycle, double timeout_in_s);
+	bool InterruptWait(bool StopSequence);  //thread safe, see CEthernetControllerFirefly::InterruptWait
+	bool WaitWasInterrupted();
 	bool ResetSequencer();
 	void AddCommandToSequence(const uint32_t& high_word, const uint32_t& low_word, const uint8_t duration_in_FPGA_clock_cycles = 2);
 	void AddBusCommandAndWait(uint32_t data, uint32_t delay);

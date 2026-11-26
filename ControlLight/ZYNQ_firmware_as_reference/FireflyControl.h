@@ -17,6 +17,11 @@ extern u32 Sequence_length_in_64bit_commands;
 extern u8 server_last_digital_data_transfer_successful();
 extern bool FireflyControl_start(unsigned long long start_pos, bool reset_input_buffer);
 extern bool FireflyControl_wait_till_finished(double timeout_in_sec);
+extern bool FireflyControl_wait_till_finished_in_cpu_command_sequence(double timeout_in_sec);
+/* Interrupting a wait for the end of the sequence from the PC, see FireflyControl.c; called by echo.c when commands are received */
+extern void FireflyControl_wait_command_received(void);
+extern void FireflyControl_reset_wait_commands(void);
+extern void FireflyControl_request_wait_interrupt(bool stop_sequence);
 extern bool CheckInputMemBufferReadout(bool FinalTransfer);
 extern bool WaitForInputBufferTransferEnd(double timeout_in_sec);
 extern void ResetInputMemBuffer();

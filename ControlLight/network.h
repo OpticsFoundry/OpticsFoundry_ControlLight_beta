@@ -62,6 +62,9 @@ public:
 	bool FlushOutputBuffer();
 	void SendMsg(CString& strText);
 	bool SendData(const uint8_t* Data, unsigned long Size);
+	// Sends directly on the socket handle, bypassing the MFC CSocket object, so that another thread can send while the owner
+	// thread is blocked in a receive call. The caller must make sure that the owner thread doesn't send at the same time.
+	bool SendDataFromOtherThread(const uint8_t* Data, unsigned long Size, unsigned long timeout_ms = 1000);
 	bool SendString(const CString& str);  // Helper for text-based protocols
 	virtual bool ReceiveMsg(char end_character = '\n', bool WaitForStartCharacter = false, char start_character = '*', double timeout_in_seconds = 5);
 	bool ReceiveData(uint8_t* buffer, unsigned long buffer_length, unsigned long timeout = 5000);

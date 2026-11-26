@@ -21,7 +21,7 @@ void CS_ExecutionJumpTo(int command_line) {
     jump_line_number = command_line;
 }
 
-bool ExecutionRunning = false;  //2026-11-26: was true before any execution
+volatile bool ExecutionRunning = false;  //2026-11-26: was true before any execution. 2026-11-27: volatile, as cs_interrupt_sequence clears it in the network receive callback
 
 
 int CS_GetNextCommandLineNumber(void) {

@@ -19,7 +19,8 @@ void OpticsFoundryFPGA_ExecuteFPGASequenceFrom(unsigned long long buffer_pos) {
 }
 
 void OpticsFoundryFPGA_WaitTillSequenceFinished(unsigned long long timeout_in_sec) {
-	FireflyControl_wait_till_finished(timeout_in_sec);
+	//2026-11-27: cs_interrupt_sequence also ends this wait (before, it only acted after the FPGA sequence had ended)
+	if (!FireflyControl_wait_till_finished_in_cpu_command_sequence(timeout_in_sec)) return;
 	if (DebugModeOn) xil_printf("Checking input buffer\n\r");
 	//only now we reset the DRAM input buffer, then we read it.
 	//this only works if the input length is shorter than the BRAM input buffer.

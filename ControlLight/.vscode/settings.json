@@ -1,0 +1,18 @@
+{
+    // Use CMakePresets.json (Ninja + MSVC cl.exe). CMake Tools loads the
+    // Visual Studio developer environment automatically for these presets.
+    "cmake.useCMakePresets": "always",
+    "cmake.sourceDirectory": "${workspaceFolder}",
+    "cmake.configureOnOpen": true,
+    "cmake.buildBeforeRun": true,
+
+    // Run/debug from the build directory: ControlLight.cpp loads its config
+    // via the relative path ..\..\..\ControlHardwareConfig.json
+    "cmake.debugConfig": {
+        "cwd": "${command:cmake.launchTargetDirectory}",
+        "console": "integratedTerminal"
+    },
+
+    // IntelliSense takes include paths/defines from the CMake configuration
+    "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools"
+}

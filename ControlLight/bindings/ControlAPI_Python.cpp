@@ -308,6 +308,25 @@ PYBIND11_MODULE(control_light_api, m) {
                 self.UpdateSequencerFirmware(sequencer, boot_image_filename.c_str());
             }, py::arg("sequencer"), py::arg("boot_image_filename"))
         .def("reboot_sequencer", &ControlLight_API::RebootSequencer, py::arg("sequencer"))
+        .def("update_sequencer_backup_firmware", [](ControlLight_API& self, unsigned int sequencer, const std::string& boot_image_filename) {
+                self.UpdateSequencerBackupFirmware(sequencer, boot_image_filename.c_str());
+            }, py::arg("sequencer"), py::arg("boot_image_filename"))
+        // returns a list of strings, one per sequencer found
+        .def("discover_sequencers", [](ControlLight_API& self, double timeout_in_seconds) {
+                std::string text(16384, '\0');
+                size_t length = text.size();
+                self.DiscoverSequencers(text.data(), length, timeout_in_seconds);
+                text.resize((length < text.size()) ? length : text.size() - 1);
+                py::list sequencers;
+                size_t start = 0;
+                while (start < text.size()) {
+                    size_t end = text.find('\n', start);
+                    if (end == std::string::npos) end = text.size();
+                    if (end > start) sequencers.append(text.substr(start, end - start));
+                    start = end + 1;
+                }
+                return sequencers;
+            }, py::arg("timeout_in_seconds") = 1.0)
 
         // Ignores TCP/IP commands
         .def("sequencer_ignore_tcpip", &ControlLight_API::SequencerIgnoreTCPIP,

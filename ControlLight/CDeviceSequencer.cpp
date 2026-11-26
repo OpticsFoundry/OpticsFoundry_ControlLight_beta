@@ -567,8 +567,8 @@ bool CDeviceSequencer::GetFirmwareInfo(std::string& info) {
 	return MyEthernetMultiIOControllerFirefly->GetFirmwareInfo(info);
 }
 
-bool CDeviceSequencer::UpdateFirmware(const std::string& BootImageFileName, std::string& report) {
-	constexpr size_t MaxBootImageSize = 16 * 1024 * 1024; //limit of sequencer firmware (3-byte QSPI addressing, DDR receive buffer)
+bool CDeviceSequencer::UpdateFirmware(const std::string& BootImageFileName, std::string& report, bool BackupImage) {
+	constexpr size_t MaxBootImageSize = 8 * 1024 * 1024; //size of a QSPI image slot in the sequencer firmware (the sequencer checks the exact limit)
 	report = "";
 	std::ifstream file(BootImageFileName, std::ios::binary | std::ios::ate);
 	if (!file) {
@@ -589,7 +589,7 @@ bool CDeviceSequencer::UpdateFirmware(const std::string& BootImageFileName, std:
 		AddErrorMessage("CDeviceSequencer::UpdateFirmware : " + report);
 		return false;
 	}
-	bool ok = MyEthernetMultiIOControllerFirefly->UpdateFirmwareQSPI(image.data(), static_cast<uint32_t>(image.size()), report);
+	bool ok = MyEthernetMultiIOControllerFirefly->UpdateFirmwareQSPI(image.data(), static_cast<uint32_t>(image.size()), report, BackupImage);
 	if (!ok) AddErrorMessage("CDeviceSequencer::UpdateFirmware : firmware update failed:\n" + report);
 	return ok;
 }

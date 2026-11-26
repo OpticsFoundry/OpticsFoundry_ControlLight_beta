@@ -399,6 +399,24 @@ namespace CLA { //optional, for C++ APIs, use namespace CLA, instead of precedin
 		/// @return See return convention above.
 		API_EXPORT ERROR_CODE_TYPE CLA_FN(UpdateSequencerFirmware)(const unsigned int& Sequencer, const char* BootImageFileName);
 
+		/// @brief Write a firmware boot image (BOOT.BIN) into the backup image slot of the sequencer's QSPI flash (offset 8 MB).
+		/// The sequencer boots the backup image if the primary image (written by UpdateSequencerFirmware) is missing or can't be loaded,
+		/// e.g. after an interrupted update. Write a well tested firmware here. The sequencer refuses this while its primary image is invalid.
+		/// Needs sequencer firmware with backup image support (2026-11-26 or later).
+		/// @param Sequencer the sequencer number.
+		/// @param BootImageFileName path of the BOOT.BIN file.
+		/// @return See return convention above.
+		API_EXPORT ERROR_CODE_TYPE CLA_FN(UpdateSequencerBackupFirmware)(const unsigned int& Sequencer, const char* BootImageFileName);
+
+		/// @brief Find OpticsFoundry sequencers on all local networks by UDP broadcast (port 57979). Doesn't need an initialized system.
+		/// Each sequencer answers with one line, e.g. "OpticsFoundry sequencer; MAC 02:4F:46:E2:9D:95; IP 192.168.1.159; TCP port 57978; build ...".
+		/// Needs sequencer firmware from 2026-11-26 on. Finding no sequencer is not an error.
+		/// @param result output buffer receiving the answers, one per line, zero terminated.
+		/// @param length input: size of result in bytes, output: length of the complete answer text (without terminating zero).
+		/// @param timeout_in_seconds how long to wait for answers.
+		/// @return See return convention above.
+		API_EXPORT ERROR_CODE_TYPE CLA_FN(DiscoverSequencers)(char* result, size_t& length, double timeout_in_seconds);
+
 		/// @brief Reboot the sequencer (software reset of processor and FPGA). It boots from the medium selected by its boot mode jumpers, which takes a few seconds.
 		/// Afterwards, the connection to this sequencer is closed. Call Cleanup and initialize the system again to continue working with it.
 		/// Needs sequencer firmware from 2026-11-26 or later.

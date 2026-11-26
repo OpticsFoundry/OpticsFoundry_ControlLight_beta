@@ -20,6 +20,8 @@ using json = nlohmann::json;
 #include "CDeviceDigitalOut.h"
 #include "CDeviceAD9858.h"
 #include "CDeviceAD9959.h"
+#include "SequencerDiscovery.h"
+#include <vector>
 
 #include <string>
 #include <iostream>
@@ -1366,6 +1368,35 @@ bool CLA_InitializeMFC(bool InitializeAfx, bool InitializeAfxSocket) {
 			std::string report;
 			bool ok = sequencer->UpdateFirmware(BootImageFileName, report);
 			API_UNLOCK_RETURN_ERROR(ok && !NewErrorOccured, "CLA_UpdateSequencerFirmware: error");
+		}
+
+		API_EXPORT ERROR_CODE_TYPE CLA_FNDEF(UpdateSequencerBackupFirmware)(const unsigned int& Sequencer, const char* BootImageFileName) {
+			API_LOCK_GUARD;
+			CDeviceSequencer* sequencer = GetSequencer(Sequencer);
+			if (!sequencer) {
+				API_UNLOCK_RETURN_ERROR(false, "CLA_UpdateSequencerBackupFirmware: Invalid sequencer");
+			}
+			if (!BootImageFileName) {
+				API_UNLOCK_RETURN_ERROR(false, "CLA_UpdateSequencerBackupFirmware: no boot image file name given");
+			}
+			std::string report;
+			bool ok = sequencer->UpdateFirmware(BootImageFileName, report, /*BackupImage*/ true);
+			API_UNLOCK_RETURN_ERROR(ok && !NewErrorOccured, "CLA_UpdateSequencerBackupFirmware: error");
+		}
+
+		API_EXPORT ERROR_CODE_TYPE CLA_FNDEF(DiscoverSequencers)(char* result, size_t& length, double timeout_in_seconds) {
+			API_LOCK_GUARD;
+			std::vector<std::string> sequencers;
+			std::string error;
+			bool ok = ::DiscoverSequencers(sequencers, timeout_in_seconds, error);
+			std::string text;
+			for (const std::string& line : sequencers) text += line + "\n";
+			if (result && (length > 0)) {
+				size_t copied = text.copy(result, (text.size() < length - 1) ? text.size() : length - 1);
+				result[copied] = 0;
+			}
+			length = text.size();
+			API_UNLOCK_RETURN_ERROR(ok, "CLA_DiscoverSequencers: " + error);
 		}
 
 		API_EXPORT ERROR_CODE_TYPE CLA_FNDEF(RebootSequencer)(const unsigned int& Sequencer) {

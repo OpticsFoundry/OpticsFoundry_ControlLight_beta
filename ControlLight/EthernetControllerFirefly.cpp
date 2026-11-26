@@ -1792,16 +1792,18 @@ bool CEthernetControllerFirefly::GetFirmwareInfo(std::string& info) {
 	return true;
 }
 
-bool CEthernetControllerFirefly::UpdateFirmwareQSPI(const uint8_t* image, uint32_t size, std::string& report) {
+bool CEthernetControllerFirefly::UpdateFirmwareQSPI(const uint8_t* image, uint32_t size, std::string& report, bool backup_image) {
 	//No automatic retries here: once the sequencer has started erasing the flash, the update must not be restarted halfway.
+	//backup_image: write the backup boot image (QSPI offset 8 MB) instead of the primary one. Needs sequencer firmware with backup image support.
 	report = "";
 	if (!Connected) {
 		report = "not connected to sequencer";
 		return false;
 	}
 	const uint32_t crc = FirmwareCRC32(image, size);
-	if (!Command("update_firmware_qspi")) {
-		report = "sequencer didn't accept command update_firmware_qspi";
+	const char* command = backup_image ? "update_backup_firmware_qspi" : "update_firmware_qspi";
+	if (!Command(command)) {
+		report = std::string("sequencer didn't accept command ") + command;
 		return false;
 	}
 	if (!WriteString(CString(std::to_string(size).c_str()))) return false;

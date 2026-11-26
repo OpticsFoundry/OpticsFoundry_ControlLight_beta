@@ -1460,6 +1460,19 @@ void DemoReadConfigEEPROM() {
 	CLA_GetAutoConfigJSON("c:\\data\\ConfigFromEEPROMs");
 }
 
+void DemoDiscoverSequencers() {
+	//Finds all OpticsFoundry sequencers on the local networks by UDP broadcast, e.g. to find the IP address to put into ControlHardwareConfig.json.
+	//Doesn't need the hardware configuration. Needs sequencer firmware from 2026-11-26 on.
+	char result[16384];
+	size_t length = sizeof(result);
+	if (!CLA_DiscoverSequencers(result, length, /*timeout_in_seconds*/ 1.0)) {
+		cout << "Discovery failed: " << CLA_GetLastError() << endl;
+		return;
+	}
+	if (length == 0) cout << "No sequencer found." << endl;
+	else cout << "Sequencers found:" << endl << result;
+}
+
 void DemoSequencerFirmwareInfo() {
 	//Shows build date, boot mode and QSPI flash ID of the firmware running on sequencer 0 (needs sequencer firmware from 2026-11-26 on)
 	if (!InitializeSystem()) {
@@ -1477,6 +1490,9 @@ void DemoUpdateSequencerFirmware() {
 	//If something goes wrong, the sequencer can still be booted from SD card or programmed via JTAG.
 	const char* BootImageFileName = "C:\\OpticsFoundry\\OF_Sequencer_Zturn\\OF_Sequencer_Zturn_Vitis_2023.1\\OpticsFoundry_Seq_Zturn_App_system\\_ide\\bootimage\\BOOT.bin";
 	constexpr bool RebootAfterUpdate = true;
+	//The sequencer boots its backup image if the primary image is missing or can't be loaded (e.g. after an interrupted update).
+	//Set this to true to write the same image also as backup image, once you have tested it.
+	constexpr bool AlsoUpdateBackupImage = false;
 	if (!InitializeSystem()) {
 		return;
 	}
@@ -1491,6 +1507,12 @@ void DemoUpdateSequencerFirmware() {
 		return;
 	}
 	cout << "Firmware update successful (" << chrono::duration_cast<chrono::seconds>(chrono::steady_clock::now() - start).count() << " s)." << endl;
+	if (AlsoUpdateBackupImage) {
+		cout << "Writing the same image as backup image." << endl;
+		if (!CLA_UpdateSequencerBackupFirmware(/*SequencerNr*/ 0, BootImageFileName)) {
+			cout << "Backup image update failed: " << CLA_GetLastError() << endl;
+		}
+	}
 	if (RebootAfterUpdate) {
 		if (CLA_RebootSequencer(/*SequencerNr*/ 0)) cout << "Sequencer reboots. It is reachable again after about 10 s." << endl;
 		else cout << "Reboot failed: " << CLA_GetLastError() << endl;
@@ -1498,13 +1520,14 @@ void DemoUpdateSequencerFirmware() {
 }
 
 int main() {
-	DemoFPGASequencerSoundBuzzer();    //A very simple experimental sequence that just sounds the Z-turn's buzzer. Good as a first test. 
+	DemoFPGASequencerSoundBuzzer();   //A very simple experimental sequence that just sounds the Z-turn's buzzer. Good as a first test. 
 	//DemoFPGASequencerSingleRun();      //An experimental sequence that tests the core functionality of all devices.
 	//DemoFPGASequencerCyclicSequencing(); //A demonstration of FPGA clock cycle perfect cycling of experimental sequences, as it is nice to have to cycle optical clocks. This demo uses the same sequence as DemoFPGASequencerSingleRun();
 	//DemoReadConfigEEPROM();            //Reads the configuration EEPROMS of all connected devices and creates Python and C++ scripts that create the corresponding .json config file. The user can add details, such as DDS clock frequencies to these scripts, and then create the final config file.
 	//DemoWriteConfigEEPROM();           //A tool to write configuration EEPROMS
 	//DemoPSI2CCommunication();         //Let Z-turn's programming system (PS = CPU + integrated ports) communicate with I2C devices connected to serial port board
 	//DemoSmartSequencer();              //A demonstration of the simple interpreter programming language that is available on the Sequencer
+	//DemoDiscoverSequencers();          //Finds all sequencers on the local networks and shows their MAC and IP addresses
 	//DemoSequencerFirmwareInfo();       //Shows build date, boot mode and QSPI flash ID of the sequencer firmware
 	//DemoUpdateSequencerFirmware();     //Writes a new firmware boot image over Ethernet into the sequencer's QSPI flash and reboots the sequencer
 	

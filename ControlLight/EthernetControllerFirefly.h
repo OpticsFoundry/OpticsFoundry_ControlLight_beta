@@ -118,7 +118,7 @@ public:
 
 	//firmware maintenance (sequencer firmware from 2026-11-26 on)
 	bool GetFirmwareInfo(std::string& info);
-	bool UpdateFirmwareQSPI(const uint8_t* image, uint32_t size, std::string& report);
+	bool UpdateFirmwareQSPI(const uint8_t* image, uint32_t size, std::string& report, bool backup_image = false);
 	bool RebootSystem();
 
 	void DebugBuffer(const std::string& filename);

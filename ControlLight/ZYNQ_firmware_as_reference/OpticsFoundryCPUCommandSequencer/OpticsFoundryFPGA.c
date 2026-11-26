@@ -143,9 +143,18 @@ void OpticsFoundryFPGA_SetAnalogOutAtBufferPosition(unsigned long long buffer_po
 	((u32*)(DDR_MEMORY))[2 * (buffer_pos)+1] |= (0xFFFF0 & (value << 4));
 }
 
+//CheckEthernetCommand(period) in a CPU command sequence: services the network if at least period ms have passed since the
+//last time, or always if period <= 0. (2026-11-27: before, it always serviced the network, independent of the period.)
 void OpticsFoundryFPGA_CheckEthernetCommand(int check_ethernet_period_ms) {
-	//ToDo: only run every check_ethernet_period_ms
-	RunEventLoop();
+	FireflyControl_service_network_every(check_ethernet_period_ms);
+}
+
+//Called by the executor after each command of a CPU command sequence, with the Ethernet check period of cs_execute_sequence.
+//A period > 0 services the network every period ms. A period <= 0 selects the fast mode, which services the network only
+//every FAST_MODE_NETWORK_SERVICE_PERIOD_MS, so that the sequence can still be stopped with cs_stop_sequence.
+//(2026-11-27: before, a period >= 0 serviced the network after every command, and a negative period never did.)
+void OpticsFoundryFPGA_ServiceNetworkBetweenCommands(int check_ethernet_period_ms) {
+	FireflyControl_service_network_every((check_ethernet_period_ms > 0) ? check_ethernet_period_ms : FAST_MODE_NETWORK_SERVICE_PERIOD_MS);
 }
 
 
@@ -198,6 +207,7 @@ unsigned long long OpticsFoundryFPGA_GetFPGABuffer(unsigned long long buffer_pos
 void OpticsFoundryFPGA_SetAD9858AmplitudeAtBufferPosition(unsigned long long buffer_pos, long long value) {}
 void OpticsFoundryFPGA_SetAnalogOutAtBufferPosition(unsigned long long buffer_pos, long long value) {}
 void OpticsFoundryFPGA_CheckEthernetCommand(int check_ethernet_period_ms) {}
+void OpticsFoundryFPGA_ServiceNetworkBetweenCommands(int check_ethernet_period_ms) {}
 void OpticsFoundryFPGA_SetAD9858PhaseAtBufferPosition(unsigned long long buffer_pos, long long value) {}
 void OpticsFoundryFPGA_SetAD9858UpdateClockAtBufferPosition(unsigned long long buffer_pos, long long value) {}
 void OpticsFoundryFPGA_SetAD9858RampRateClockAtBufferPosition(unsigned long long buffer_pos, long long value) {}

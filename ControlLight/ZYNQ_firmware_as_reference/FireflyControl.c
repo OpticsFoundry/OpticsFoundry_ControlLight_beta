@@ -2291,7 +2291,7 @@ bool FireflyControl_wait_till_finished(double timeout_in_sec) {
 			RunEventLoop();
 			CheckInputMemBufferReadout(/* LastTransfer */ FALSE);
 			CheckForPLToPSCommand();
-		}
+		} else FireflyControl_service_network_every(FAST_MODE_NETWORK_SERVICE_PERIOD_MS); //2026-11-27: fast mode didn't service the network at all
 		if (DebugModeOn) PrintSequenceStatusRegularly();
 		//sleep(0.5);
 		if (LastNextDMA0Transfer != NextDMA0Transfer){
@@ -2317,6 +2317,30 @@ bool FireflyControl_wait_till_finished(double timeout_in_sec) {
 	IgnoreTCPIP = FALSE;
 	FireflyControl_print_statistics();
 	return true;
+}
+
+/* Development test commands (test1, test2, test_timer, adc). They overwrite the loaded sequence, switch the clock or block
+ * the firmware, so since 2026-11-27 they can't be used over the network unless this is set to 1 for a development build.
+ * Even then they are ignored while a sequence is running. */
+#define ENABLE_TEST_COMMANDS 0
+
+#if ENABLE_TEST_COMMANDS
+static bool IsTestCommand(const char* command) {
+	return (strcmp(command,"test1") == 0) || (strcmp(command,"test2") == 0) || (strcmp(command,"test_timer") == 0) || (strcmp(command,"adc") == 0);
+}
+#endif
+
+/* Services the network (RunEventLoop) if at least period_ms milliseconds have passed since the last time this function did so,
+ * or always if period_ms <= 0. Used while the firmware is busy with something that would otherwise block the network for a
+ * long time (CPU command sequences, waiting for the end of a sequence), so that the TCP connection stays alive and urgent
+ * commands such as cs_stop_sequence are received. Reading the global timer takes well below a microsecond. */
+void FireflyControl_service_network_every(int period_ms) {
+	static XTime LastService = 0;
+	XTime now;
+	XTime_GetTime(&now);
+	if ((period_ms > 0) && ((now - LastService) < ((XTime)period_ms * (COUNTS_PER_SECOND / 1000)))) return;
+	LastService = now;
+	RunEventLoop();
 }
 
 void FireflyControlLoop() {
@@ -2370,23 +2394,33 @@ void FireflyControlLoop() {
 		if (DebugModeOn) xil_printf("Command received: %s\r\n", command);
 		if ((strcmp(command,"help") == 0) || (strcmp(command,"h") == 0)) {
 			if (DebugModeOn) xil_printf("help: display command list\r\n", command);
-			if (DebugModeOn) xil_printf("test1: emit test sequence\r\n", command);
-			if (DebugModeOn) xil_printf("test2: simple self test\r\n", command);
-			if (DebugModeOn) xil_printf("adc: test adc\r\n", command);
-		} else if (strcmp(command,"test2") == 0) {
-			if (DebugModeOn) xil_printf("test2: emit test sequence\r\n", command);
-			firefly_control_execute_test_sequence();
-		} else if (strcmp(command,"test1") == 0) {
+#if ENABLE_TEST_COMMANDS
 			if (DebugModeOn) xil_printf("test1: simple self test\r\n", command);
-			firefly_control_self_test();
-		} else if (strcmp(command,"test_timer") == 0) {
-			if (DebugModeOn) xil_printf("test timer\r\n", command);
-			firefly_control_test_timer();
-		} else if (strcmp(command,"adc") == 0) {
-			if (DebugModeOn) xil_printf("adc_regs: test xadc\r\n", command);
-			firefly_control_test_adc();
-		} 
-		
+			if (DebugModeOn) xil_printf("test2: emit test sequence\r\n", command);
+			if (DebugModeOn) xil_printf("test_timer: test timer\r\n", command);
+			if (DebugModeOn) xil_printf("adc: test adc\r\n", command);
+#endif
+		}
+#if ENABLE_TEST_COMMANDS
+		else if (IsTestCommand(command)) {
+			//2026-11-27: test commands overwrite the loaded sequence (test2, adc), switch the clock (test1) or block for 1 s (test_timer)
+			if (Sequence_running) xil_printf("%s: ignored while a sequence is running\r\n", command);
+			else if (strcmp(command,"test2") == 0) {
+				if (DebugModeOn) xil_printf("test2: emit test sequence\r\n", command);
+				firefly_control_execute_test_sequence();
+			} else if (strcmp(command,"test1") == 0) {
+				if (DebugModeOn) xil_printf("test1: simple self test\r\n", command);
+				firefly_control_self_test();
+			} else if (strcmp(command,"test_timer") == 0) {
+				if (DebugModeOn) xil_printf("test timer\r\n", command);
+				firefly_control_test_timer();
+			} else if (strcmp(command,"adc") == 0) {
+				if (DebugModeOn) xil_printf("adc_regs: test xadc\r\n", command);
+				firefly_control_test_adc();
+			}
+		}
+#endif
+
 		else if (strcmp(command,"cs_assemble_sequence") == 0) {
 			CS_AssembleSequence();
 		} else if (strcmp(command,"cs_add_command") == 0) {

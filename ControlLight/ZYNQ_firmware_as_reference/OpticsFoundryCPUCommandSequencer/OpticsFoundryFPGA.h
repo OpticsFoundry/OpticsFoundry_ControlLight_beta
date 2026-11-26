@@ -33,6 +33,7 @@ extern unsigned long long OpticsFoundryFPGA_GetFPGABuffer(unsigned long long buf
 extern void OpticsFoundryFPGA_SetFPGABuffer(unsigned long long buffer_pos, unsigned long long value);
 extern void OpticsFoundryFPGA_SetAnalogOutAtBufferPosition(unsigned long long buffer_pos, long long value);
 extern void OpticsFoundryFPGA_CheckEthernetCommand(int check_ethernet_period_ms);
+extern void OpticsFoundryFPGA_ServiceNetworkBetweenCommands(int check_ethernet_period_ms);
 extern void OpticsFoundryFPGA_SetAD9858FrequencyAtBufferPosition(unsigned long long buffer_pos, long long value);
 extern void OpticsFoundryFPGA_SetAD9858AmplitudeAtBufferPosition(unsigned long long buffer_pos, long long value);
 extern void OpticsFoundryFPGA_SetAD9858PhaseAtBufferPosition(unsigned long long buffer_pos, long long value);

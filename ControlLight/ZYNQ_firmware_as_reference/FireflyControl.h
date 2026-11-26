@@ -29,3 +29,9 @@ extern void FireflyControl_init_hardware(void);
 extern u8* FireflyControl_get_scratch_buffer(u32* size_in_bytes);
 extern void SetLED0Color(unsigned char red, unsigned char green, unsigned char blue);
 extern void SwitchBuzzer(unsigned char OnOff);
+
+/* While the firmware runs in a fast mode that otherwise doesn't service the network (CPU command sequence with an Ethernet
+ * check period <= 0, wait_till_finished with a timeout <= 1 ms), the network is still serviced at this period, so that the
+ * TCP connection stays alive and a CPU command sequence can be stopped. One service takes typically some ten microseconds. */
+#define FAST_MODE_NETWORK_SERVICE_PERIOD_MS 100
+extern void FireflyControl_service_network_every(int period_ms);

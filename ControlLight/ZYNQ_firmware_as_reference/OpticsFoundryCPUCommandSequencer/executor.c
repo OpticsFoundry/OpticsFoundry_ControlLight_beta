@@ -108,7 +108,7 @@ static CommandStatus ExecuteSequence(int check_ethernet_period_ms) {
             Execution_jumped = false;
         }
         else next_line_number++;
-        if (check_ethernet_period_ms >= 0) OpticsFoundryFPGA_CheckEthernetCommand(check_ethernet_period_ms);
+        OpticsFoundryFPGA_ServiceNetworkBetweenCommands(check_ethernet_period_ms);  //2026-11-27: a negative period never serviced the network, so the sequence couldn't be stopped
     }
     return CMD_SUCCESS;
 }

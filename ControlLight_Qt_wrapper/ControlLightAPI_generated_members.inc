@@ -316,7 +316,7 @@ public:
     bool AddCPUCommand(const char* command);
 
     /// @brief Execute the assembled CPU command sequence.
-    /// @param ethernet_check_period_in_ms period in ms between Ethernet status checks while the CPU command sequence is running. Use 0 to not check the Ethernet status (increases timing precision and speed slightly).
+    /// @param ethernet_check_period_in_ms period in ms between Ethernet status checks while the CPU command sequence is running. Use 0 for the highest timing precision and speed: then the Ethernet status is checked only every 100 ms, so that the sequence can still be stopped with StopCPUCommandSequence. (Firmware before 2026-11-27 checked after every command, independent of this period.)
     /// @return See return convention above.
     bool ExecuteCPUCommandSequence(unsigned long ethernet_check_period_in_ms);
 

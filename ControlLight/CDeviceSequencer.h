@@ -123,6 +123,8 @@ public:
 	bool SaveFirmware(const std::string& BootImageFileName, std::string& report);
 	bool CopyFirmwareToSDCard(const std::string& SDCardPath, std::string& report);
 	bool Reboot();
+	//reboots into the primary image written by UpdateFirmware on trial and confirms it once it answers (firmware from 2026-11-27 on)
+	bool RebootWithTrialBoot(std::string& report);
 	bool GetNetworkSettings(std::string& info);
 	//settings: "dhcp" or "fixed <IP> <netmask> [<gateway>]"; stores them in the sequencer and reboots it, so that they take effect
 	bool SetNetworkSettingsAndReboot(const std::string& settings, std::string& report);

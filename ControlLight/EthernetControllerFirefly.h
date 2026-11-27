@@ -59,6 +59,10 @@ private:
 
 	uint8_t* previous_input_buffer_ptr;
 
+	//CRC32 of the primary firmware image written by UpdateFirmwareQSPI, needed by TrialRebootAndConfirm
+	bool NewPrimaryImageWritten = false;
+	uint32_t NewPrimaryImageCRC = 0;
+
 private:
 	void StartSPIAnalogInAcquisition(unsigned char analog_in_type, unsigned char SPI_CS, unsigned int channel_nr, unsigned int number_of_datapoints, double delay_between_datapoints_in_ms);	
 	void StartXADCAnalogInAcquisition(unsigned int channel_nr, unsigned int number_of_datapoints, double delay_between_datapoints_in_ms);
@@ -127,6 +131,8 @@ public:
 	bool UpdateFirmwareQSPI(const uint8_t* image, uint32_t size, std::string& report, bool backup_image = false);
 	bool ReadFirmwareImage(std::vector<uint8_t>& image, std::string& report);
 	bool RebootSystem();
+	//trial boot of the primary image written by UpdateFirmwareQSPI (sequencer firmware from 2026-11-27 on)
+	bool TrialRebootAndConfirm(unsigned int trial_timeout_in_seconds, std::string& report);
 	//network settings (sequencer firmware from 2026-11-27 on)
 	bool GetNetworkSettings(std::string& info);
 	bool SetNetworkSettings(const std::string& settings, std::string& report); //settings: "dhcp" or "fixed <IP> <netmask> [<gateway>]"

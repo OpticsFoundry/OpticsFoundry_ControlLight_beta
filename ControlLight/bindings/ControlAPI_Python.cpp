@@ -322,6 +322,8 @@ PYBIND11_MODULE(control_light_api, m) {
                 self.UpdateSequencerFirmware(sequencer, boot_image_filename.c_str());
             }, py::arg("sequencer"), py::arg("boot_image_filename"))
         .def("reboot_sequencer", &ControlLight_API::RebootSequencer, py::arg("sequencer"))
+        // reboots into the image written by update_sequencer_firmware on trial and confirms it (firmware from 2026-11-27 on)
+        .def("reboot_sequencer_with_trial_boot", &ControlLight_API::RebootSequencerWithTrialBoot, py::arg("sequencer"))
         .def("update_sequencer_backup_firmware", [](ControlLight_API& self, unsigned int sequencer, const std::string& boot_image_filename) {
                 self.UpdateSequencerBackupFirmware(sequencer, boot_image_filename.c_str());
             }, py::arg("sequencer"), py::arg("boot_image_filename"))

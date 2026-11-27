@@ -25,6 +25,7 @@
 #include "sequencer_identity.h"
 #include "sd_installer.h"
 #include "network_settings.h"
+#include "trial_boot.h"
 
 extern bool DebugModeOn;
 extern void RunEventLoop();
@@ -131,17 +132,28 @@ static void WaitMsServicingNetwork(u32 ms) {
 }
 
 /* send one line of text to the PC and push it out immediately */
-static void SendLine(const char* format, ...) {
+static void SendLineV(const char* format, va_list args) {
 	char line[1000];
-	va_list args;
-	va_start(args, format);
 	vsnprintf(line, sizeof(line) - 2, format, args);
-	va_end(args);
 	xil_printf("%s\r\n", line);
 	if (!UseNetwork) return;
 	strcat(line, "\n");
 	server_send_ascii(line);
 	if (last_tpcb) tcp_output(last_tpcb);
+}
+
+static void SendLine(const char* format, ...) {
+	va_list args;
+	va_start(args, format);
+	SendLineV(format, args);
+	va_end(args);
+}
+
+void FirmwareUpdate_send_line(const char* format, ...) {
+	va_list args;
+	va_start(args, format);
+	SendLineV(format, args);
+	va_end(args);
 }
 
 /* ---------------- QSPI flash access ---------------- */
@@ -400,17 +412,57 @@ bool FirmwareUpdate_write_settings(u32 offset, const u8* data, u32 length) {
 	return ok;
 }
 
+bool FirmwareUpdate_erase_settings(u32 offset) {
+	if ((offset % FLASH_SUBSECTOR_SIZE) != 0) return false;
+	if (!SettingsAccessOk(offset, 1, 1)) return false;
+	if (FlashReadStatus() & FLASH_STATUS_BP_MASK) return false;
+	const u32 address = QSPI_SETTINGS_OFFSET + offset;
+	FlashOperationInProgress = true;
+	bool ok = FlashEraseSubsector(address) && IsErased(FlashRead(address, 16), 16);
+	FlashOperationInProgress = false;
+	return ok;
+}
+
+/* ---------------- slot status and invalidation ---------------- */
+
+bool FirmwareUpdate_primary_image_valid(void) {
+	FirmwareUpdate_init();
+	return PrimaryImageValid;
+}
+
+bool FirmwareUpdate_backup_image_valid(void) {
+	FirmwareUpdate_init();
+	return BackupImageValid;
+}
+
+/* erases the first sector of the primary slot, which holds its boot header; the BootROM then boots the backup image */
+bool FirmwareUpdate_invalidate_primary_image(bool use_network) {
+	FirmwareUpdate_init();
+	if (!QspiReady || FlashOperationInProgress) return false;
+	if (FlashUsableSize(FlashJedecId) < FLASH_MAX_SIZE_3BYTE) return false;
+	if (FlashReadStatus() & FLASH_STATUS_BP_MASK) return false;
+	UseNetwork = use_network;
+	FlashOperationInProgress = true;
+	bool erased = FlashEraseSector(QSPI_PRIMARY_IMAGE_OFFSET);
+	UpdateCachedSlotStatus();
+	FlashOperationInProgress = false;
+	UseNetwork = true;
+	return erased && !PrimaryImageValid;
+}
+
 /* ---------------- Ethernet command handlers ---------------- */
 
 void FirmwareUpdate_send_firmware_info(void) {
 	char firmware[256];
 	char identity[300];
 	char sd_install[200];
+	char trial_boot[300];
 	FirmwareUpdate_describe(firmware, sizeof(firmware));
 	SequencerIdentity_describe(identity, sizeof(identity));
 	SdInstaller_describe(sd_install, sizeof(sd_install));
-	SendLine("OpticsFoundry Z-turn sequencer firmware; %s; %s%s; USR button %s; supports update_firmware_qspi, update_backup_firmware_qspi, test_backup_boot, install_from_sd, read_firmware_image, reboot_system, discovery, interrupt_wait, network_settings",
-			firmware, identity, sd_install, UserButton_pressed() ? "pressed" : "released");
+	TrialBoot_describe(trial_boot, sizeof(trial_boot));
+	SendLine("OpticsFoundry Z-turn sequencer firmware; %s; %s%s%s; USR button %s; supports update_firmware_qspi, update_backup_firmware_qspi, test_backup_boot, install_from_sd, read_firmware_image, reboot_system, discovery, interrupt_wait, network_settings, trial_boot",
+			firmware, identity, sd_install, trial_boot, UserButton_pressed() ? "pressed" : "released");
 }
 
 /* verify flash against data, returns false and sends an error line on mismatch */
@@ -509,6 +561,11 @@ void FirmwareUpdate_update_qspi(u8* buffer, u32 buffer_size, bool sequence_runni
 		SendLine("ERROR %s: another flash operation is in progress", command);
 		return;
 	}
+	if (TrialBoot_running()) {
+		/* the trial watchdog would reset the board during the update, and a failed trial falls back to the backup image */
+		SendLine("ERROR %s: the firmware runs on trial (trial boot) and hasn't been confirmed yet. Confirm it first (confirm_firmware).", command);
+		return;
+	}
 	FirmwareUpdate_init();
 	if (!QspiReady) {
 		SendLine("ERROR %s: QSPI controller initialization failed", command);
@@ -570,9 +627,15 @@ void FirmwareUpdate_update_qspi(u8* buffer, u32 buffer_size, bool sequence_runni
 			: (BackupImageValid ? "The primary image is incomplete; the board will boot the backup image. Write the primary image again."
 			                    : "The primary image is incomplete and there is no backup image; boot from SD card or use JTAG to recover.");
 	FlashOperationInProgress = true;
-	WriteImageToSlot(slot_offset, buffer, size, recovery_hint);
+	bool written = WriteImageToSlot(slot_offset, buffer, size, recovery_hint);
 	UpdateCachedSlotStatus();
 	FlashOperationInProgress = false;
+	if (backup_image) {
+		if (written) TrialBoot_backup_image_written(crc);
+	} else {
+		if (written) TrialBoot_primary_image_written(buffer, size, crc);
+		else TrialBoot_primary_image_changed();
+	}
 }
 
 /* true if the slot already contains exactly this image */
@@ -595,6 +658,10 @@ int FirmwareUpdate_install_image(const u8* image, u32 size, bool use_network, ch
 	FirmwareUpdate_init();
 	if (FlashOperationInProgress || !QspiReady) {
 		snprintf(summary, summary_size, "failed: QSPI flash not available");
+		return result;
+	}
+	if (TrialBoot_running()) {
+		snprintf(summary, summary_size, "failed: the firmware runs on trial (trial boot) and hasn't been confirmed yet. Confirm it first (confirm_firmware).");
 		return result;
 	}
 	if (FlashUsableSize(FlashJedecId) < FLASH_MAX_SIZE_3BYTE) {
@@ -632,6 +699,7 @@ int FirmwareUpdate_install_image(const u8* image, u32 size, bool use_network, ch
 	UpdateCachedSlotStatus();
 	FlashOperationInProgress = false;
 	UseNetwork = true;
+	if (written || !ok) TrialBoot_primary_image_changed();
 	if (!ok) {
 		snprintf(summary, summary_size, "failed while writing the QSPI flash");
 		return result;
@@ -723,11 +791,9 @@ void FirmwareUpdate_test_backup_boot(bool sequence_running) {
 		SendLine("ERROR test_backup_boot: QSPI flash is write protected (status register 0x%02X)", status);
 		return;
 	}
-	FlashOperationInProgress = true;
-	bool erased = FlashEraseSector(QSPI_PRIMARY_IMAGE_OFFSET);
-	UpdateCachedSlotStatus();
-	FlashOperationInProgress = false;
-	if (!erased || PrimaryImageValid) {
+	bool invalidated = FirmwareUpdate_invalidate_primary_image(/*use_network*/ true);
+	TrialBoot_primary_image_changed();
+	if (!invalidated) {
 		SendLine("ERROR test_backup_boot: erasing the primary boot header failed");
 		return;
 	}
@@ -753,6 +819,8 @@ void FirmwareUpdate_reboot(void) {
 	 * (if that is invalid, the BootROM search continues to the backup image). */
 	Xil_Out32(DEVCFG_UNLOCK, DEVCFG_UNLOCK_KEY);
 	Xil_Out32(DEVCFG_MULTIBOOT, 0);
+	/* a deliberate reboot during a trial boot is not a failure of the new firmware: FSBL starts a new trial */
+	TrialBoot_before_reboot();
 	Xil_Out32(SLCR_UNLOCK_ADDR, SLCR_UNLOCK_KEY);
 	Xil_Out32(SLCR_PSS_RST_CTRL, 1);  /* SOFT_RST: resets PS and PL, BootROM boots again */
 	while (1);

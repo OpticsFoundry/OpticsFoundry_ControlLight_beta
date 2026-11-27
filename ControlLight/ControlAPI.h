@@ -391,7 +391,7 @@ namespace CLA { //optional, for C++ APIs, use namespace CLA, instead of precedin
 
 		/// @brief Write a new firmware boot image (BOOT.BIN, as created by Vitis "Create Boot Image") over Ethernet into the QSPI flash of the sequencer.
 		/// The sequencer checks size, CRC32 and boot header, erases and programs the flash, and reads it back for verification. This takes about a minute.
-		/// The running firmware is not affected; the new firmware is used after the next boot from QSPI flash, see RebootSequencer.
+		/// The running firmware is not affected; the new firmware is used after the next boot from QSPI flash, see RebootSequencerWithTrialBoot (recommended) and RebootSequencer.
 		/// Don't switch off the sequencer while this function runs. If the update fails, boot the sequencer from SD card or use JTAG to recover.
 		/// Needs sequencer firmware from 2026-11-26 or later.
 		/// @param Sequencer the sequencer number.
@@ -442,6 +442,18 @@ namespace CLA { //optional, for C++ APIs, use namespace CLA, instead of precedin
 		/// @param Sequencer the sequencer number.
 		/// @return See return convention above.
 		API_EXPORT ERROR_CODE_TYPE CLA_FN(RebootSequencer)(const unsigned int& Sequencer);
+
+		/// @brief Reboot the sequencer into the new firmware written by UpdateSequencerFirmware "on trial", and confirm it.
+		/// The sequencer starts a watchdog when it boots the new firmware. This function waits until the new firmware answers
+		/// (usually about 10 s), checks that it is the image written before, and confirms it, which stops the watchdog.
+		/// If the new firmware doesn't work (no answer within 120 s), the watchdog resets the sequencer and it boots its backup
+		/// firmware, which keeps running also after power cycles; this function then reports an error (after up to 3 minutes).
+		/// Needs a valid backup image, sequencer firmware from 2026-11-27 on (running and new), and UpdateSequencerFirmware
+		/// called before for this sequencer. Write the new firmware as backup image (UpdateSequencerBackupFirmware) only after
+		/// it has been confirmed. Afterwards, the connection to this sequencer is closed. Call Cleanup and initialize the system again.
+		/// @param Sequencer the sequencer number.
+		/// @return See return convention above.
+		API_EXPORT ERROR_CODE_TYPE CLA_FN(RebootSequencerWithTrialBoot)(const unsigned int& Sequencer);
 
 		/// @brief Read the network settings of the sequencer: the stored setting (DHCP or fixed IP address) and the current IP address,
 		/// netmask, gateway and where the address came from, e.g.

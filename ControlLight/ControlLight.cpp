@@ -1577,8 +1577,13 @@ void DemoUpdateSequencerFirmware() {
 	//If something goes wrong, the sequencer can still be booted from SD card or programmed via JTAG.
 	const char* BootImageFileName = "C:\\OpticsFoundry\\OF_Sequencer_Zturn\\OF_Sequencer_Zturn_Vitis_2023.1\\OpticsFoundry_Seq_Zturn_App_system\\_ide\\bootimage\\BOOT.bin";
 	constexpr bool RebootAfterUpdate = true;
-	//The sequencer boots its backup image if the primary image is missing or can't be loaded (e.g. after an interrupted update).
-	//Set this to true to write the same image also as backup image, once you have tested it.
+	//Trial boot (sequencer firmware from 2026-11-27 on, both the running and the new one, and a valid backup image): the sequencer
+	//boots the new firmware with a watchdog running, and CLA_RebootSequencerWithTrialBoot confirms it once it answers. If the new
+	//firmware doesn't work, the sequencer falls back to its backup image by itself after 2 minutes.
+	//Set this to false to reboot without trial (e.g. when installing older firmware, or if there is no backup image).
+	constexpr bool UseTrialBoot = true;
+	//The sequencer boots its backup image if the primary image is missing or can't be loaded (e.g. after an interrupted update),
+	//or if a trial boot fails. Set this to true to write the same image also as backup image, after it has been confirmed.
 	constexpr bool AlsoUpdateBackupImage = false;
 	if (!InitializeSystem()) {
 		return;
@@ -1594,17 +1599,31 @@ void DemoUpdateSequencerFirmware() {
 		return;
 	}
 	cout << "Firmware update successful (" << chrono::duration_cast<chrono::seconds>(chrono::steady_clock::now() - start).count() << " s)." << endl;
+	if (!RebootAfterUpdate) return;
+	if (!UseTrialBoot) {
+		if (CLA_RebootSequencer(/*SequencerNr*/ 0)) cout << "Sequencer reboots. It is reachable again after about 10 s." << endl;
+		else cout << "Reboot failed: " << CLA_GetLastError() << endl;
+		return;
+	}
+	cout << "Rebooting the sequencer into the new firmware on trial, and confirming it once it answers." << endl;
+	start = chrono::steady_clock::now();
+	if (!CLA_RebootSequencerWithTrialBoot(/*SequencerNr*/ 0)) {
+		cout << "Trial boot failed: " << CLA_GetLastError() << endl;
+		return;
+	}
+	cout << "New firmware runs and is confirmed (" << chrono::duration_cast<chrono::seconds>(chrono::steady_clock::now() - start).count() << " s)." << endl;
 	if (AlsoUpdateBackupImage) {
+		//the reboot closed the connection
+		CLA_Cleanup();
+		if (!InitializeSystem()) {
+			return;
+		}
 		cout << "Writing the same image as backup image." << endl;
 		if (!CLA_UpdateSequencerBackupFirmware(/*SequencerNr*/ 0, BootImageFileName)) {
 			cout << "Backup image update failed: " << CLA_GetLastError() << endl;
 		}
 	}
-	if (RebootAfterUpdate) {
-		if (CLA_RebootSequencer(/*SequencerNr*/ 0)) cout << "Sequencer reboots. It is reachable again after about 10 s." << endl;
-		else cout << "Reboot failed: " << CLA_GetLastError() << endl;
-	}
-} 
+}
 
 int main() {
 	//DemoDiscoverSequencers();          //Finds all sequencers on the local networks and shows their MAC and IP addresses

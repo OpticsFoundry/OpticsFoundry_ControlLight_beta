@@ -33,6 +33,7 @@ extern void RunEventLoop(); //defined in main.c
 #include "FireflyControl.h"
 #include "firmware_update.h"
 #include "sd_installer.h"
+#include "trial_boot.h"
 
 //I2C port
 #include "xiicps.h"
@@ -1651,25 +1652,6 @@ void FireflyControl_get_sequence_number() {
 	if (DebugModeOn) xil_printf("Sequence number = %s", buf);
 }
 
-u32 BootWatchdog = 0;
-
-void FireflyControl_get_boot_watchdog() {
-	char buf[20];
-	sprintf(buf, "%lu\n",BootWatchdog);
-	server_send_ascii(buf);
-	if (DebugModeOn) xil_printf("FireflyControl_get_boot_watchdog: Boot watchdog = %s", buf);
-}
-
-void FireflyControl_set_boot_watchdog() {
-	unsigned char * number_as_string = server_get_command(/*timeout*/10.0);
-	if (number_as_string == NULL) {
-		if (DebugModeOn) xil_printf("FireflyControl_set_boot_watchdog : no data size received\r\n");
-		return;
-	}
-	BootWatchdog = atoi((char*)number_as_string);
-	if (DebugModeOn) xil_printf("FireflyControl_set_boot_watchdog : Boot watchdog = %lu\n", BootWatchdog);
-}
-
 void print_sequence_status() {
 	LatchCoreStatus();
 	u32 address = ReadLatchedExtendedAddress();
@@ -2588,10 +2570,6 @@ void FireflyControlLoop() {
 			if (DebugModeOn) xil_printf("Sending input buffer\n\r");
 			SendInputBuffer();
 			if (DebugModeOn) xil_printf("Input buffer sent\n\r");
-		} else if (strcmp(command,"get_boot_watchdog") == 0) {
-			FireflyControl_get_boot_watchdog();
-		} else if (strcmp(command,"set_boot_watchdog") == 0) {
-			FireflyControl_set_boot_watchdog();
 		} else if (strcmp(command,"transmit_I2C") == 0) {
 			FireflyControl_transmit_I2C();
 		} else if (strcmp(command,"set_PS_options") == 0) {
@@ -2611,6 +2589,10 @@ void FireflyControlLoop() {
 			FirmwareUpdate_send_image((u8*)(DDR_MODIFY_BUFFER_START), DDR_MODIFY_BUFFER_LENGTH_IN_BYTES, Sequence_running);
 		} else if (strcmp(command,"reboot_system") == 0) {
 			FirmwareUpdate_reboot();
+		} else if (strcmp(command,"trial_reboot") == 0) {
+			TrialBoot_reboot_command(Sequence_running);
+		} else if (strcmp(command,"confirm_firmware") == 0) {
+			TrialBoot_confirm_command();
 		} else if (strcmp(command,"get_network_settings") == 0) {
 			NetworkSettings_get_command();
 		} else if (strcmp(command,"set_network_settings") == 0) {

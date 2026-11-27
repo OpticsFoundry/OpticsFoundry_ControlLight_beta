@@ -54,6 +54,7 @@
 #include "sequencer_identity.h"
 #include "sd_installer.h"
 #include "network_settings.h"
+#include "trial_boot.h"
 #include "xtime_l.h"
 
 /* defined by each RAW mode application */
@@ -299,6 +300,8 @@ The complete list is shown in "MicroZed ethernet lwIP BSP working vs not working
 	FirmwareUpdate_init();
 	/* when booted from an installer SD card (BOOT.BIN + INSTALL file): copy BOOT.BIN into the QSPI flash */
 	SdInstaller_run_at_boot();
+	/* trial boot of a new primary image: running on trial, or fallen back to the backup image (2026-11-27) */
+	TrialBoot_init();
 	SequencerIdentity_get_mac(mac_ethernet_address);
 	xil_printf("MAC address %02X:%02X:%02X:%02X:%02X:%02X\r\n", mac_ethernet_address[0], mac_ethernet_address[1],
 			mac_ethernet_address[2], mac_ethernet_address[3], mac_ethernet_address[4], mac_ethernet_address[5]);

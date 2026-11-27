@@ -6,7 +6,7 @@
  *   0x000000  primary boot image, written by update_firmware_qspi      (max 8 MB)
  *   0x800000  backup boot image, written by update_backup_firmware_qspi (max 8 MB - 64 KB)
  *   0xFF0000  settings sector (64 KB): two copies of the settings record in the 4 KB subsectors at
- *             0xFF0000 and 0xFF1000, see network_settings.h
+ *             0xFF0000 and 0xFF1000, see network_settings.h; trial boot record at 0xFF2000, see trial_boot.h
  *
  * The Zynq BootROM boots the first valid boot image it finds, searching the flash in
  * 32 KB steps from offset 0. Images are written with their boot header (first flash page)
@@ -46,6 +46,12 @@
  *  reboot_system
  *      -> "OK rebooting\n", then a full system (PS + PL) software reset.
  *      The BootROM then boots from the medium selected by the boot mode jumpers.
+ *
+ *  trial_reboot, confirm_firmware   (see trial_boot.h)
+ *      reboot into a new primary image on trial, and confirm it afterwards
+ *
+ *  While a new firmware runs on trial and hasn't been confirmed, update_firmware_qspi, update_backup_firmware_qspi and
+ *  install_from_sd are refused.
  */
 
 #include <stdbool.h>
@@ -81,6 +87,18 @@ u32 FirmwareUpdate_crc32(const u8* data, u32 length);  /* zlib / IEEE 802.3 CRC3
  * Doesn't service the network (takes typically 50 ms, at most about 1 s). */
 bool FirmwareUpdate_read_settings(u32 offset, u8* data, u32 length);
 bool FirmwareUpdate_write_settings(u32 offset, const u8* data, u32 length);
+bool FirmwareUpdate_erase_settings(u32 offset);  /* erases the 4 KB subsector starting at offset (4 KB aligned) */
+
+/* image slot status, cached (doesn't access the flash) */
+bool FirmwareUpdate_primary_image_valid(void);
+bool FirmwareUpdate_backup_image_valid(void);
+
+/* Erases the first sector of the primary image slot (with its boot header), so that the BootROM boots the backup image.
+ * use_network: service the network while erasing (false at start-up). Returns true if the primary image is invalid afterwards. */
+bool FirmwareUpdate_invalidate_primary_image(bool use_network);
+
+/* sends one line of text to the connected PC (and the UART), like the firmware update commands do */
+void FirmwareUpdate_send_line(const char* format, ...);
 
 /* Writes a boot image into both QSPI slots (primary first), skipping slots that already contain it.
  * use_network: report progress to the connected PC and service the network while writing (false at start-up).

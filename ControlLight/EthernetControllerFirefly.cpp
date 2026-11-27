@@ -1836,7 +1836,12 @@ bool CEthernetControllerFirefly::UpdateFirmwareQSPI(const uint8_t* image, uint32
 		return false;
 	}
 	report += "\n" + CStringToStdString(answer);
-	return (CStringToStdString(answer).rfind("OK", 0) == 0);
+	const bool programmed = (CStringToStdString(answer).rfind("OK", 0) == 0);
+	if (!backup_image) {
+		NewPrimaryImageWritten = programmed;
+		NewPrimaryImageCRC = crc;
+	}
+	return programmed;
 }
 
 bool CEthernetControllerFirefly::ReadFirmwareImage(std::vector<uint8_t>& image, std::string& report) {
@@ -1894,6 +1899,90 @@ bool CEthernetControllerFirefly::RebootSystem() {
 	//the sequencer closes the connection and restarts; it can't be used before it has rebooted and the system has been initialized again
 	Connected = false;
 	return ok;
+}
+
+bool CEthernetControllerFirefly::TrialRebootAndConfirm(unsigned int trial_timeout_in_seconds, std::string& report) {
+	//Reboots the sequencer into the primary image written by UpdateFirmwareQSPI as a trial boot: unless the new firmware is
+	//confirmed within trial_timeout_in_seconds, a watchdog resets the sequencer and it boots its backup image.
+	//Waits until the new firmware answers, checks that it is the image written before, and confirms it.
+	//Afterwards the connection is closed, as after RebootSystem.
+	report = "";
+	if (!Connected) {
+		report = "not connected to sequencer";
+		return false;
+	}
+	if (!NewPrimaryImageWritten) {
+		report = "no new primary firmware image was written to this sequencer since the connection was opened (UpdateSequencerFirmware)";
+		return false;
+	}
+	std::string info;
+	if (!GetFirmwareInfo(info) || (info.find("trial_boot") == std::string::npos)) {
+		report = "the running sequencer firmware doesn't support trial boot (firmware older than 2026-11-27). Reboot with RebootSequencer instead.";
+		return false;
+	}
+	if (!Command("trial_reboot")) {
+		report = "sequencer didn't accept command trial_reboot";
+		return false;
+	}
+	if (!WriteString(CString(std::to_string(trial_timeout_in_seconds).c_str()))) {
+		report = "error sending the trial boot timeout";
+		return false;
+	}
+	CString answer;
+	GetCommand(answer, /*timeout_in_seconds*/ 10);
+	report = CStringToStdString(answer);
+	if (report.rfind("OK", 0) != 0) {  //refused: the sequencer doesn't reboot
+		if (report.empty()) report = "no answer from sequencer to trial_reboot";
+		return false;
+	}
+	GetCommand(answer, /*timeout_in_seconds*/ 3);  //"OK rebooting"; then the sequencer closes the connection
+	Connected = false;
+
+	//The sequencer needs about 10 s to boot. Wait a bit longer than the trial timeout, so that after a failed trial
+	//the backup firmware is up, too, and reports the failure.
+	const std::string expected_crc = std::format("CRC32 0x{:08X}", NewPrimaryImageCRC);
+	const auto deadline = chrono::steady_clock::now() + chrono::seconds(trial_timeout_in_seconds + 60);
+	this_thread::sleep_for(5s);
+	std::string last_info;
+	while (chrono::steady_clock::now() < deadline) {
+		bool reconnected = false;
+		try {
+			reconnected = Network && Network->Reconnect(/*maxRetries*/ 0, /*timeout_s*/ 2, /*delay_ms*/ 0);
+			if (reconnected && AttemptCommand("get_firmware_info") && GetCommand(answer, /*timeout_in_seconds*/ 3)) {
+				last_info = CStringToStdString(answer);
+			}
+			else last_info = "";
+		}
+		catch (...) {  //errors while the sequencer reboots are expected; with THROW_EXCEPTIONS they arrive as exceptions
+			last_info = "";
+		}
+		if (last_info.rfind("OpticsFoundry", 0) == 0) {
+			const size_t trial = last_info.find("trial boot: ");
+			if ((trial != std::string::npos) && (last_info.compare(trial, 19, "trial boot: RUNNING") == 0) && (last_info.find(expected_crc, trial) != std::string::npos)) {
+				CString confirmation;
+				Connected = true;
+				bool confirmed = AttemptCommand("confirm_firmware") && GetCommand(confirmation, /*timeout_in_seconds*/ 10);
+				const std::string text = CStringToStdString(confirmation);
+				report += "\nnew firmware runs: " + last_info + "\n" + text;
+				confirmed = confirmed && (text.rfind("OK firmware confirmed", 0) == 0);
+				Connected = false;  //the system needs to be initialized again after the reboot
+				Network->DisconnectSocket();
+				return confirmed;
+			}
+			if ((trial != std::string::npos) && (last_info.compare(trial, 18, "trial boot: FAILED") == 0)) {
+				report += "\nthe new firmware was not confirmed in time; the sequencer has fallen back to its backup firmware: " + last_info;
+			}
+			else {
+				report += "\nthe sequencer rebooted, but doesn't run the new firmware on trial: " + last_info;
+			}
+			Network->DisconnectSocket();
+			return false;
+		}
+		this_thread::sleep_for(1s);
+	}
+	report += std::format("\nthe sequencer didn't answer within {} s after the reboot. If the new firmware doesn't work, the sequencer boots its backup firmware {} s after the reboot.",
+		trial_timeout_in_seconds + 60, trial_timeout_in_seconds);
+	return false;
 }
 
 bool CEthernetControllerFirefly::GetNetworkSettings(std::string& info) {

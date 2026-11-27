@@ -677,6 +677,15 @@ bool CDeviceSequencer::Reboot() {
 	return MyEthernetMultiIOControllerFirefly->RebootSystem();
 }
 
+bool CDeviceSequencer::RebootWithTrialBoot(std::string& report) {
+	//The new firmware has to be confirmed within this time after the reboot, otherwise the sequencer boots its backup image.
+	//The sequencer usually answers about 10 s after the reboot; DHCP may take longer.
+	constexpr unsigned int TrialTimeoutInSeconds = 120;
+	bool ok = MyEthernetMultiIOControllerFirefly->TrialRebootAndConfirm(TrialTimeoutInSeconds, report);
+	if (!ok) AddErrorMessage("CDeviceSequencer::RebootWithTrialBoot : " + report);
+	return ok;
+}
+
 bool CDeviceSequencer::GetNetworkSettings(std::string& info) {
 	return MyEthernetMultiIOControllerFirefly->GetNetworkSettings(info);
 }

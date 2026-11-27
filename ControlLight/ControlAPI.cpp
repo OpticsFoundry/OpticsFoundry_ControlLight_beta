@@ -1480,6 +1480,18 @@ bool CLA_InitializeMFC(bool InitializeAfx, bool InitializeAfxSocket) {
 			API_UNLOCK_RETURN_ERROR(ok && !NewErrorOccured, "CLA_RebootSequencer: error");
 		}
 
+		API_EXPORT ERROR_CODE_TYPE CLA_FNDEF(RebootSequencerWithTrialBoot)(const unsigned int& Sequencer) {
+			API_LOCK_GUARD;
+			CDeviceSequencer* sequencer = GetSequencer(Sequencer);
+			if (!sequencer) {
+				API_UNLOCK_RETURN_ERROR(false, "CLA_RebootSequencerWithTrialBoot: Invalid sequencer");
+			}
+			std::string report;
+			//only ok counts: while the sequencer reboots, the reconnection attempts may record harmless network errors
+			bool ok = sequencer->RebootWithTrialBoot(report);
+			API_UNLOCK_RETURN_ERROR(ok, "CLA_RebootSequencerWithTrialBoot: error");
+		}
+
 		API_EXPORT ERROR_CODE_TYPE CLA_FNDEF(GetSequencerNetworkSettings)(const unsigned int& Sequencer, char* info, size_t& length) {
 			API_LOCK_GUARD;
 			CDeviceSequencer* sequencer = GetSequencer(Sequencer);

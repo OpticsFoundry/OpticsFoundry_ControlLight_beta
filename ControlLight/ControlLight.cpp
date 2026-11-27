@@ -621,7 +621,7 @@ void DemoSequence(unsigned long CycleNumber) {
 	constexpr uint8_t AD9854Addr = AD9854_0_addr;
 	constexpr uint8_t SerialPortSlotNr = SerialPort_0_SlotNr;
 
-	CLA_StartAssemblingSequence();  //starts sequence and stores timetag. If DemoSequence is called from DemoFPGASequencerCyclicSequencing, the sequence waits after that timetag till the clock cycle counter in the FPGA reaches the target
+	CLA_StartAssemblingSequence();  //starts sequence and stores timetag. If DemoSequence is called from DemoSequencerCyclicSequencing, the sequence waits after that timetag till the clock cycle counter in the FPGA reaches the target
 	CLA_SwitchSequencerBuzzer(/*SequencerNr*/ 0, true);
 	CLA_SequencerWriteSystemTimeToInputMemory(SequencerNr); //a second time tag. When cycling sequences, this allows to determine the time the FPGA waited for a trigger. This time should always be reasonably large (a few 10ms at least) to accomodate timing fluctuations of the PC and the ethernet connection.
 	CLA_SequencerWriteInputMemory(SequencerNr, CycleNumber); //write current cycle number to the input memory. This is used to verify if data of the correct cycle was retrieved.
@@ -963,7 +963,7 @@ void DemoSequenceAnalyseData(unsigned long CycleNumber, uint32_t* buffer, const 
 }
 
 
-void DemoFPGASequencerSingleRun() {
+void DemoSequencerSingleRun() {
 	if (!InitializeSystem()) {
 		return;
 	}
@@ -991,7 +991,7 @@ void DemoFPGASequencerSingleRun() {
 }
 
 
-void DemoFPGASequencerCyclicSequencing() {
+void DemoSequencerCyclicSequencing() {
 	if (!InitializeSystem()) {
 		return;
 	}
@@ -1019,7 +1019,7 @@ void DemoFPGASequencerCyclicSequencing() {
 		cout << "Iteration " << CycleNr << ": ";
 		//We create sequence from scratch to update trigger settings and cycle number dependent sequence entries.
 		DemoSequence(CycleNr);
-		//CLA_ExecuteSequence("c:\\data\\DebugDemoFPGASequencerCyclicSequence.txt"); //Use this version to create debug file
+		//CLA_ExecuteSequence("c:\\data\\DebugDemoSequencerCyclicSequence.txt"); //Use this version to create debug file
 		CLA_ExecuteSequence(); //use this version to run without creating debug file
 		bool running = false;
 		unsigned long long DataPointsWritten = 0;
@@ -1069,7 +1069,7 @@ void DemoPSI2CCommunication() {
 }
 
 
-void DemoFPGASequencerSoundBuzzer() {
+void DemoSequencerSoundBuzzer() {
 	if (!InitializeSystem()) {
 		return;
 	}
@@ -1085,7 +1085,7 @@ void DemoFPGASequencerSoundBuzzer() {
 		CLA_Wait_ms(50);
 	}
 	CLA_SequencerWriteSystemTimeToInputMemory(/*SequencerNr*/ 0); //store FPGA counter as a timestamp so that one can easily determine the exact sequence duration
-	CLA_ExecuteSequence("c:\\data\\DebugDemoFPGASequencerSoundBuzzerSequenceWorking.txt"); //Use this version to create debug file
+	CLA_ExecuteSequence("c:\\data\\DebugDemoSequencerSoundBuzzerSequenceWorking.txt"); //Use this version to create debug file
 	//CLA_ExecuteSequence(); //use this version to run without creating debug file
 	//CLA_WaitTillEndOfSequence(10);
 	uint8_t* buffer_8bit = nullptr;
@@ -1604,14 +1604,14 @@ void DemoUpdateSequencerFirmware() {
 		if (CLA_RebootSequencer(/*SequencerNr*/ 0)) cout << "Sequencer reboots. It is reachable again after about 10 s." << endl;
 		else cout << "Reboot failed: " << CLA_GetLastError() << endl;
 	}
-}
+} 
 
 int main() {
 	//DemoDiscoverSequencers();          //Finds all sequencers on the local networks and shows their MAC and IP addresses
-	DemoFPGASequencerSoundBuzzer();   //A very simple experimental sequence that just sounds the Z-turn's buzzer. Good as a first test. 
+	DemoSequencerSoundBuzzer();   //A very simple experimental sequence that just sounds the Z-turn's buzzer. Good as a first test. 
 	//DemoReadConfigEEPROM();            //Reads the configuration EEPROMS of all connected devices and creates Python and C++ scripts that create the corresponding .json config file. The user can add details, such as DDS clock frequencies to these scripts, and then create the final config file.
-	//DemoFPGASequencerSingleRun();      //An experimental sequence that tests the core functionality of all devices.
-	//DemoFPGASequencerCyclicSequencing(); //A demonstration of FPGA clock cycle perfect cycling of experimental sequences, as it is nice to have to cycle optical clocks. This demo uses the same sequence as DemoFPGASequencerSingleRun();
+	//DemoSequencerSingleRun();      //An experimental sequence that tests the core functionality of all devices.
+	//DemoSequencerCyclicSequencing(); //A demonstration of FPGA clock cycle perfect cycling of experimental sequences, as it is nice to have to cycle optical clocks. This demo uses the same sequence as DemoSequencerSingleRun();
 	
 	//DemoWriteConfigEEPROM();           //A tool to write configuration EEPROMS
 	//DemoPSI2CCommunication();         //Let Z-turn's programming system (PS = CPU + integrated ports) communicate with I2C devices connected to serial port board

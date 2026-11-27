@@ -23,6 +23,29 @@ void MessageBox(QString aMessage) {
     TelnetTester->setStatusText(aMessage, true);
 }
 
+//Network settings of the sequencers (needs sequencer firmware from 2026-11-27 on).
+//By default (DHCP) a sequencer gets its IP address from a DHCP server; without DHCP server (e.g. connected directly to the PC) it uses after 3 s
+//a link-local address 169.254.x.y, as a PC does. A fixed IP address is useful if the PC's network adapter has a fixed IP address.
+bool ShowSequencerNetworkSettings() {
+    //Discovery works without initialized system and finds sequencers also if their IP address is in another subnet than the PC
+    char result[16384];
+    size_t length = sizeof(result);
+    if (!CA.DiscoverSequencers(result, length, /*timeout_in_seconds*/ 1.0)) return false;
+    TelnetTester->setStatusText((length == 0) ? QString("No sequencer found.") : "Sequencers found:\n" + QString(result), true);
+    if (!CA.IsReady()) return true;
+    char info[1024];
+    length = sizeof(info);
+    if (CA.GetSequencerNetworkSettings(/*Sequencer*/ 0, info, length)) TelnetTester->setStatusText("Network settings of sequencer 0: " + QString(info), true);
+    //Changing the setting stores it in the sequencer and reboots it (about 10 s); afterwards enter its new IP address in ControlHardwareConfig.json:
+    //CA.SetSequencerFixedIP(/*Sequencer*/ 0, "192.168.1.10", "255.255.255.0", /*Gateway, "" for none*/ "");
+    //CA.SetSequencerDHCP(/*Sequencer*/ 0);
+    //If a sequencer can't be reached with its IP address, set it by its MAC address (shown by the discovery above) with a UDP broadcast,
+    //which works without initialized system and across subnets. Or hold the Z-turn USR button while switching it on, until it beeps twice: back to DHCP.
+    //CA.SetSequencerFixedIPByMAC("02:4F:46:4C:B5:52", "192.168.1.10", "255.255.255.0", "");
+    //CA.SetSequencerDHCPByMAC("02:4F:46:4C:B5:52");
+    return true;
+}
+
 
 
 bool LoadControlHardwareInterface() {

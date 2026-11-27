@@ -677,6 +677,23 @@ bool CDeviceSequencer::Reboot() {
 	return MyEthernetMultiIOControllerFirefly->RebootSystem();
 }
 
+bool CDeviceSequencer::GetNetworkSettings(std::string& info) {
+	return MyEthernetMultiIOControllerFirefly->GetNetworkSettings(info);
+}
+
+bool CDeviceSequencer::SetNetworkSettingsAndReboot(const std::string& settings, std::string& report) {
+	if (!MyEthernetMultiIOControllerFirefly->SetNetworkSettings(settings, report)) {
+		AddErrorMessage("CDeviceSequencer::SetNetworkSettings : " + report);
+		return false;
+	}
+	if (!MyEthernetMultiIOControllerFirefly->RebootSystem()) {
+		report += "\nreboot failed; the new network settings take effect after the next reboot";
+		AddErrorMessage("CDeviceSequencer::SetNetworkSettings : " + report);
+		return false;
+	}
+	return true;
+}
+
 void CDeviceSequencer::SetSequencerDigitalOut(uint8_t dig_out_pattern) {
 	MyEthernetMultiIOControllerFirefly->AddCommandSetCoreOption_dig_out(dig_out_pattern);
 }

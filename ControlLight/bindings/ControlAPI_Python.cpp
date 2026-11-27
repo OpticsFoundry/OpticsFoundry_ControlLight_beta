@@ -312,7 +312,7 @@ PYBIND11_MODULE(control_light_api, m) {
 
         // Sequencer firmware maintenance (needs sequencer firmware from 2026-11-26 on)
         .def("get_sequencer_firmware_info", [](ControlLight_API& self, unsigned int sequencer) {
-                std::string info(512, '\0');
+                std::string info(2048, '\0');
                 size_t length = info.size();
                 self.GetSequencerFirmwareInfo(sequencer, info.data(), length);
                 info.resize((length < info.size()) ? length : info.size() - 1);
@@ -348,6 +348,25 @@ PYBIND11_MODULE(control_light_api, m) {
                 }
                 return sequencers;
             }, py::arg("timeout_in_seconds") = 1.0)
+        // Network settings (needs sequencer firmware from 2026-11-27 on). The set_... functions store the setting in the
+        // sequencer and reboot it; the ..._by_mac variants work by UDP broadcast, without initialized system, also across subnets.
+        .def("get_sequencer_network_settings", [](ControlLight_API& self, unsigned int sequencer) {
+                std::string info(1024, '\0');
+                size_t length = info.size();
+                self.GetSequencerNetworkSettings(sequencer, info.data(), length);
+                info.resize((length < info.size()) ? length : info.size() - 1);
+                return info;
+            }, py::arg("sequencer"))
+        .def("set_sequencer_fixed_ip", [](ControlLight_API& self, unsigned int sequencer, const std::string& ip, const std::string& netmask, const std::string& gateway) {
+                self.SetSequencerFixedIP(sequencer, ip.c_str(), netmask.c_str(), gateway.c_str());
+            }, py::arg("sequencer"), py::arg("ip"), py::arg("netmask"), py::arg("gateway") = "")
+        .def("set_sequencer_dhcp", &ControlLight_API::SetSequencerDHCP, py::arg("sequencer"))
+        .def("set_sequencer_fixed_ip_by_mac", [](ControlLight_API& self, const std::string& mac, const std::string& ip, const std::string& netmask, const std::string& gateway) {
+                self.SetSequencerFixedIPByMAC(mac.c_str(), ip.c_str(), netmask.c_str(), gateway.c_str());
+            }, py::arg("mac"), py::arg("ip"), py::arg("netmask"), py::arg("gateway") = "")
+        .def("set_sequencer_dhcp_by_mac", [](ControlLight_API& self, const std::string& mac) {
+                self.SetSequencerDHCPByMAC(mac.c_str());
+            }, py::arg("mac"))
 
         // Ignores TCP/IP commands
         .def("sequencer_ignore_tcpip", &ControlLight_API::SequencerIgnoreTCPIP,

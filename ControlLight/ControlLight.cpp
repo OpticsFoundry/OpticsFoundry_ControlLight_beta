@@ -1514,7 +1514,7 @@ void DemoDiscoverSequencers() {
 void DemoCopySequencerFirmwareToSDCard() {
 	//Creates an installer SD card with the firmware of sequencer 0: writes its firmware as BOOT.BIN plus the marker file INSTALL
 	//onto the SD card in this PC's card reader. Booting another Z-turn from that card (boot mode SD card: JP1 open, JP2 closed)
-	//installs the firmware into its QSPI flash; afterwards set both jumpers to closed. Needs sequencer firmware from 2026-11-26 on.
+	//installs the firmware into its QSPI flash (about 30 s, until two short beeps); afterwards set both jumpers to closed. Needs sequencer firmware from 2026-11-26 on.
 	const char* SDCardPath = "E:\\";  //root folder of the SD card (FAT32)
 	if (!InitializeSystem()) {
 		return;
@@ -1529,10 +1529,46 @@ void DemoSequencerFirmwareInfo() {
 	if (!InitializeSystem()) {
 		return;
 	}
-	char info[512];
+	char info[2048];
 	size_t length = sizeof(info);
 	if (CLA_GetSequencerFirmwareInfo(/*SequencerNr*/ 0, info, length)) cout << "Sequencer firmware: " << info << endl;
 	else cout << "Could not read sequencer firmware info: " << CLA_GetLastError() << endl;
+}
+
+void DemoSequencerNetworkSettings() {
+	//Shows and changes how the sequencer gets its IP address (needs sequencer firmware from 2026-11-27 on).
+	//DHCP (factory setting): the sequencer gets its IP address from a DHCP server (e.g. the router of the network). Without DHCP server, e.g.
+	//  when connected directly to a PC, it uses after 3 s a link-local address 169.254.x.y (always the same for one board), as a PC does.
+	//Fixed IP: useful if the PC's network adapter has a fixed IP address, e.g. 192.168.1.1, and the sequencer shall be 192.168.1.10.
+	//Changing the setting reboots the sequencer (about 10 s). Afterwards enter its new IP address in ControlHardwareConfig.json.
+	//If the sequencer can't be reached any more: DemoDiscoverSequencers finds it even if its IP address is in another subnet; then set it
+	//by its MAC address (SetDHCPByMAC or SetFixedIPByMAC below). Or hold the Z-turn USR button while switching the sequencer on, until it beeps twice: back to DHCP.
+	enum class Action { ShowOnly, SetFixedIP, SetDHCP, SetFixedIPByMAC, SetDHCPByMAC };
+	const Action action = Action::ShowOnly;        //choose what to do
+	const char* FixedIP = "192.168.1.10";
+	const char* Netmask = "255.255.255.0";
+	const char* Gateway = "";                      //router address, needed only to reach the sequencer from other subnets; "" for none
+	const char* MAC = "02:4F:46:4C:B5:52";         //for the ...ByMAC actions: the MAC address shown by DemoDiscoverSequencers
+
+	DemoDiscoverSequencers();   //shows MAC address, IP address, netmask, gateway and IP source (DHCP, fixed or link-local) of all sequencers
+	if ((action == Action::SetFixedIPByMAC) || (action == Action::SetDHCPByMAC)) {
+		//by UDP broadcast: doesn't need ControlHardwareConfig.json and works also if the sequencer's IP address is in another subnet than the PC
+		bool ok = (action == Action::SetFixedIPByMAC) ? CLA_SetSequencerFixedIPByMAC(MAC, FixedIP, Netmask, Gateway) : CLA_SetSequencerDHCPByMAC(MAC);
+		if (ok) cout << "Network setting stored; the sequencer reboots." << endl;
+		else cout << "Changing the network setting failed: " << CLA_GetLastError() << endl;
+		return;
+	}
+	if (!InitializeSystem()) {
+		return;
+	}
+	char info[1024];
+	size_t length = sizeof(info);
+	if (CLA_GetSequencerNetworkSettings(/*SequencerNr*/ 0, info, length)) cout << "Network settings of sequencer 0: " << info << endl;
+	else cout << "Could not read the network settings: " << CLA_GetLastError() << endl;
+	if (action == Action::ShowOnly) return;
+	bool ok = (action == Action::SetFixedIP) ? CLA_SetSequencerFixedIP(/*SequencerNr*/ 0, FixedIP, Netmask, Gateway) : CLA_SetSequencerDHCP(/*SequencerNr*/ 0);
+	if (ok) cout << "Network setting stored; the sequencer reboots. Enter its new IP address in ControlHardwareConfig.json." << endl;
+	else cout << "Changing the network setting failed: " << CLA_GetLastError() << endl;
 }
 
 void DemoUpdateSequencerFirmware() {
@@ -1547,7 +1583,7 @@ void DemoUpdateSequencerFirmware() {
 	if (!InitializeSystem()) {
 		return;
 	}
-	char info[512];
+	char info[2048];
 	size_t length = sizeof(info);
 	if (CLA_GetSequencerFirmwareInfo(/*SequencerNr*/ 0, info, length)) cout << "Sequencer firmware before update: " << info << endl;
 	cout << "Writing " << BootImageFileName << " into the QSPI flash of the sequencer." << endl;
@@ -1571,18 +1607,21 @@ void DemoUpdateSequencerFirmware() {
 }
 
 int main() {
+	//DemoDiscoverSequencers();          //Finds all sequencers on the local networks and shows their MAC and IP addresses
 	DemoFPGASequencerSoundBuzzer();   //A very simple experimental sequence that just sounds the Z-turn's buzzer. Good as a first test. 
+	//DemoReadConfigEEPROM();            //Reads the configuration EEPROMS of all connected devices and creates Python and C++ scripts that create the corresponding .json config file. The user can add details, such as DDS clock frequencies to these scripts, and then create the final config file.
 	//DemoFPGASequencerSingleRun();      //An experimental sequence that tests the core functionality of all devices.
 	//DemoFPGASequencerCyclicSequencing(); //A demonstration of FPGA clock cycle perfect cycling of experimental sequences, as it is nice to have to cycle optical clocks. This demo uses the same sequence as DemoFPGASequencerSingleRun();
-	//DemoReadConfigEEPROM();            //Reads the configuration EEPROMS of all connected devices and creates Python and C++ scripts that create the corresponding .json config file. The user can add details, such as DDS clock frequencies to these scripts, and then create the final config file.
+	
 	//DemoWriteConfigEEPROM();           //A tool to write configuration EEPROMS
 	//DemoPSI2CCommunication();         //Let Z-turn's programming system (PS = CPU + integrated ports) communicate with I2C devices connected to serial port board
 	//DemoSmartSequencer();              //A demonstration of the simple interpreter programming language that is available on the Sequencer
-	//DemoDiscoverSequencers();          //Finds all sequencers on the local networks and shows their MAC and IP addresses
+	//DemoInterruptWaitTillEndOfSequence(); //Interrupts CLA_WaitTillEndOfSequence from another thread, as a "Stop" button would
+	
 	//DemoSequencerFirmwareInfo();       //Shows build date, boot mode and QSPI flash ID of the sequencer firmware
+	//DemoSequencerNetworkSettings();    //Shows the network settings of the sequencer and sets a fixed IP address or DHCP
 	//DemoUpdateSequencerFirmware();     //Writes a new firmware boot image over Ethernet into the sequencer's QSPI flash and reboots the sequencer
 	//DemoCopySequencerFirmwareToSDCard(); //Creates an installer SD card with the sequencer's firmware, to set up another Z-turn board
-	//DemoInterruptWaitTillEndOfSequence(); //Interrupts CLA_WaitTillEndOfSequence from another thread, as a "Stop" button would
 	
 	//Unfinished demos:
 	//DemoDDSVCO();                      //Unfinished demo of the fast digital VCO capability of the sequencer.

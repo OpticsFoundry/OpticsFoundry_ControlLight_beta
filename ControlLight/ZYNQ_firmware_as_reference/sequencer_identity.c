@@ -11,6 +11,7 @@
 #include "lwip/ip_addr.h"
 #include "sequencer_identity.h"
 #include "firmware_update.h"
+#include "network_settings.h"
 
 extern struct netif *echo_netif;   /* main.c */
 
@@ -49,9 +50,11 @@ bool SequencerIdentity_mac_from_unique_id(void) {
 void SequencerIdentity_describe(char* text, size_t size) {
 	const ip4_addr_t* ip = (echo_netif != NULL) ? netif_ip4_addr(echo_netif) : NULL;
 	if (ip != NULL) {
-		snprintf(text, size, "MAC %02X:%02X:%02X:%02X:%02X:%02X%s; IP %d.%d.%d.%d",
+		char network[160];
+		NetworkSettings_describe_current(network, sizeof(network));
+		snprintf(text, size, "MAC %02X:%02X:%02X:%02X:%02X:%02X%s; IP %d.%d.%d.%d; %s",
 				Mac[0], Mac[1], Mac[2], Mac[3], Mac[4], Mac[5], MacFromUniqueId ? "" : " (fixed)",
-				ip4_addr1(ip), ip4_addr2(ip), ip4_addr3(ip), ip4_addr4(ip));
+				ip4_addr1(ip), ip4_addr2(ip), ip4_addr3(ip), ip4_addr4(ip), network);
 	} else {
 		snprintf(text, size, "MAC %02X:%02X:%02X:%02X:%02X:%02X; IP -", Mac[0], Mac[1], Mac[2], Mac[3], Mac[4], Mac[5]);
 	}
@@ -59,32 +62,39 @@ void SequencerIdentity_describe(char* text, size_t size) {
 
 static void DiscoveryReceive(void *arg, struct udp_pcb *pcb, struct pbuf *p, const ip_addr_t *addr, u16_t port) {
 	if (p == NULL) return;
-	char request[64];
+	char request[200];
 	u16_t length = pbuf_copy_partial(p, request, sizeof(request) - 1, 0);
 	pbuf_free(p);
 	request[length] = 0;
 	while ((length > 0) && ((request[length - 1] == '\n') || (request[length - 1] == '\r'))) request[--length] = 0;
+	if (NetworkSettings_handle_udp_request(request, addr, port)) return;
 	if (strcmp(request, SEQUENCER_DISCOVERY_REQUEST) != 0) return;
 
-	char identity[160];
+	char identity[300];
 	char firmware[256];
-	char reply[460];
+	char reply[600];
 	SequencerIdentity_describe(identity, sizeof(identity));
 	FirmwareUpdate_describe(firmware, sizeof(firmware));
 	int reply_length = snprintf(reply, sizeof(reply), "OpticsFoundry sequencer; %s; TCP port %d; %s", identity, SEQUENCER_TCP_PORT, firmware);
 	if (reply_length <= 0) return;
 	if (reply_length >= (int)sizeof(reply)) reply_length = sizeof(reply) - 1;
+	reply[reply_length] = 0;
+	SequencerIdentity_udp_reply(addr, port, reply);
+}
 
-	struct pbuf* answer = pbuf_alloc(PBUF_TRANSPORT, (u16_t)reply_length, PBUF_RAM);
+void SequencerIdentity_udp_reply(const ip_addr_t* addr, u16_t port, const char* text) {
+	if (DiscoveryPcb == NULL) return;
+	size_t length = strlen(text);
+	struct pbuf* answer = pbuf_alloc(PBUF_TRANSPORT, (u16_t)length, PBUF_RAM);
 	if (answer == NULL) return;
-	memcpy(answer->payload, reply, reply_length);
+	memcpy(answer->payload, text, length);
 	/* unicast if the requester is in our subnet; otherwise (e.g. our IP belongs to another subnet) broadcast */
 	const ip4_addr_t* own_ip = netif_ip4_addr(echo_netif);
 	const ip4_addr_t* own_mask = netif_ip4_netmask(echo_netif);
 	if (!ip4_addr_isany(own_ip) && ip4_addr_netcmp(ip_2_ip4(addr), own_ip, own_mask)) {
-		udp_sendto(pcb, answer, addr, port);
+		udp_sendto(DiscoveryPcb, answer, addr, port);
 	} else {
-		udp_sendto(pcb, answer, IP_ADDR_BROADCAST, port);
+		udp_sendto(DiscoveryPcb, answer, IP_ADDR_BROADCAST, port);
 	}
 	pbuf_free(answer);
 }

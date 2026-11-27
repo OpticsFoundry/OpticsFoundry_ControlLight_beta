@@ -10,3 +10,9 @@
 // Duplicate answers (a sequencer reached over several interfaces) are removed.
 // Returns false only if the discovery couldn't be run at all (error describes why); finding no sequencer is not an error.
 bool DiscoverSequencers(std::vector<std::string>& sequencers, double timeout_in_seconds, std::string& error);
+
+// Sets the network settings of the sequencer with the given MAC address by UDP broadcast (sequencer firmware from 2026-11-27 on),
+// also if its IP address is in another subnet. settings: "dhcp" or "fixed <IP> <netmask> [<gateway>]". The sequencer stores
+// them and reboots. answer receives its answer line, e.g. "OpticsFoundry set_network; MAC ...; OK stored DHCP; rebooting".
+// Returns true if the sequencer confirmed; otherwise error describes the problem.
+bool SetSequencerNetworkByMAC(const std::string& mac_address, const std::string& settings, double timeout_in_seconds, std::string& answer, std::string& error);

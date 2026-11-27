@@ -29,6 +29,7 @@ private slots:
     void on_btCycleSequence_clicked();
     void on_btCycleSequenceWithIndividualCommandUpdate_clicked();
 	void on_btStopCycling_clicked();
+	void on_btNetworkSettings_clicked();
 
     void onCommand(const QString &cmd);
 

@@ -418,7 +418,7 @@ namespace CLA { //optional, for C++ APIs, use namespace CLA, instead of precedin
 
 		/// @brief Copy the firmware of the sequencer onto an SD card (in the PC's card reader), creating an installer SD card.
 		/// Writes the firmware boot image read from the sequencer's QSPI flash as BOOT.BIN, plus the empty marker file INSTALL, into SDCardPath.
-		/// Booting another Z-turn from that card (boot mode jumpers on SD card) copies the firmware into its QSPI flash.
+		/// Booting another Z-turn from that card (boot mode jumpers on SD card) copies the firmware into its QSPI flash, which takes about 30 s.
 		/// The card must be formatted with FAT32 (or FAT16). Eject the card safely before removing it from the PC.
 		/// Needs sequencer firmware from 2026-11-26 (evening) on.
 		/// @param Sequencer the sequencer number.
@@ -427,7 +427,8 @@ namespace CLA { //optional, for C++ APIs, use namespace CLA, instead of precedin
 		API_EXPORT ERROR_CODE_TYPE CLA_FN(CopySequencerFirmwareToSDCard)(const unsigned int& Sequencer, const char* SDCardPath);
 
 		/// @brief Find OpticsFoundry sequencers on all local networks by UDP broadcast (port 57979). Doesn't need an initialized system.
-		/// Each sequencer answers with one line, e.g. "OpticsFoundry sequencer; MAC 02:4F:46:E2:9D:95; IP 192.168.1.159; TCP port 57978; build ...".
+		/// Each sequencer answers with one line, e.g. "OpticsFoundry sequencer; MAC 02:4F:46:E2:9D:95; IP 192.168.1.159; netmask 255.255.255.0; gateway 192.168.1.1; IP source DHCP; TCP port 57978; build ...".
+		/// Sequencers whose IP address is in another subnet than the PC are found, too (but can only be reached after changing their address, see SetSequencerFixedIPByMAC).
 		/// Needs sequencer firmware from 2026-11-26 on. Finding no sequencer is not an error.
 		/// @param result output buffer receiving the answers, one per line, zero terminated.
 		/// @param length input: size of result in bytes, output: length of the complete answer text (without terminating zero).
@@ -441,6 +442,52 @@ namespace CLA { //optional, for C++ APIs, use namespace CLA, instead of precedin
 		/// @param Sequencer the sequencer number.
 		/// @return See return convention above.
 		API_EXPORT ERROR_CODE_TYPE CLA_FN(RebootSequencer)(const unsigned int& Sequencer);
+
+		/// @brief Read the network settings of the sequencer: the stored setting (DHCP or fixed IP address) and the current IP address,
+		/// netmask, gateway and where the address came from, e.g.
+		/// "stored setting DHCP; current IP 169.254.215.80; netmask 255.255.0.0; gateway 0.0.0.0; IP source link-local (no DHCP server)".
+		/// With DHCP, a sequencer that gets no answer from a DHCP server within 3 s uses a link-local address 169.254.x.y (fixed for each board),
+		/// as a PC without DHCP server does. Needs sequencer firmware from 2026-11-27 on.
+		/// @param Sequencer the sequencer number.
+		/// @param info output buffer receiving the zero terminated description.
+		/// @param length input: size of info in bytes, output: length of the description (without terminating zero).
+		/// @return See return convention above.
+		API_EXPORT ERROR_CODE_TYPE CLA_FN(GetSequencerNetworkSettings)(const unsigned int& Sequencer, char* info, size_t& length);
+
+		/// @brief Give the sequencer a fixed IP address instead of getting one by DHCP. The sequencer stores the setting in its flash memory and reboots.
+		/// Afterwards the connection to it is closed: enter the new IP address in the configuration file (ControlHardwareConfig.json), call Cleanup and initialize the system again.
+		/// If the sequencer can't be reached with the new address, find it with DiscoverSequencers and use SetSequencerDHCPByMAC, or
+		/// hold the Z-turn USR button while switching the sequencer on, until it beeps twice: this sets it back to DHCP.
+		/// Needs sequencer firmware from 2026-11-27 on.
+		/// @param Sequencer the sequencer number.
+		/// @param IP the fixed IP address, e.g. "192.168.1.10". Not allowed: 0.x.x.x, 127.x.x.x, 169.254.x.x, 224.x.x.x and above, the network and broadcast address of the subnet.
+		/// @param Netmask the netmask, e.g. "255.255.255.0".
+		/// @param Gateway the gateway (router) address, e.g. "192.168.1.1", or nullptr or "" for none. Needed only to reach the sequencer from other subnets.
+		/// @return See return convention above.
+		API_EXPORT ERROR_CODE_TYPE CLA_FN(SetSequencerFixedIP)(const unsigned int& Sequencer, const char* IP, const char* Netmask, const char* Gateway);
+
+		/// @brief Let the sequencer get its IP address by DHCP (the factory setting). The sequencer stores the setting in its flash memory and reboots.
+		/// Afterwards the connection to it is closed; find its new address with DiscoverSequencers. Needs sequencer firmware from 2026-11-27 on.
+		/// @param Sequencer the sequencer number.
+		/// @return See return convention above.
+		API_EXPORT ERROR_CODE_TYPE CLA_FN(SetSequencerDHCP)(const unsigned int& Sequencer);
+
+		/// @brief Like SetSequencerFixedIP, but addresses the sequencer by its MAC address (as shown by DiscoverSequencers) with a UDP broadcast,
+		/// so it works also when the sequencer's current IP address is in another subnet than the PC, e.g. to repair a wrong fixed IP address.
+		/// Doesn't need an initialized system. The sequencer reboots afterwards. Needs sequencer firmware from 2026-11-27 on.
+		/// @param MAC the MAC address of the sequencer, e.g. "02:4F:46:4C:B5:52".
+		/// @param IP the fixed IP address, see SetSequencerFixedIP.
+		/// @param Netmask the netmask, e.g. "255.255.255.0".
+		/// @param Gateway the gateway address, or nullptr or "" for none.
+		/// @return See return convention above.
+		API_EXPORT ERROR_CODE_TYPE CLA_FN(SetSequencerFixedIPByMAC)(const char* MAC, const char* IP, const char* Netmask, const char* Gateway);
+
+		/// @brief Like SetSequencerDHCP, but addresses the sequencer by its MAC address (as shown by DiscoverSequencers) with a UDP broadcast,
+		/// so it works also when the sequencer's current IP address is in another subnet than the PC. Doesn't need an initialized system.
+		/// The sequencer reboots afterwards. Needs sequencer firmware from 2026-11-27 on.
+		/// @param MAC the MAC address of the sequencer, e.g. "02:4F:46:4C:B5:52".
+		/// @return See return convention above.
+		API_EXPORT ERROR_CODE_TYPE CLA_FN(SetSequencerDHCPByMAC)(const char* MAC);
 
 		/// @brief Write configuration data to the EEPROM of a rack slot.
 		/// @param SequencerID the sequencer to use.

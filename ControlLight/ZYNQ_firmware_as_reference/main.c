@@ -53,6 +53,8 @@
 #include "firmware_update.h"
 #include "sequencer_identity.h"
 #include "sd_installer.h"
+#include "network_settings.h"
+#include "xtime_l.h"
 
 /* defined by each RAW mode application */
 void print_app_header();
@@ -150,6 +152,7 @@ void RunEventLoop() { //make sure other parts of the program regularly (at least
 		TcpSlowTmrFlag = 0;
 	}
 	xemacif_input(echo_netif);
+	NetworkSettings_poll();   /* reboot requested over UDP, link-local address after a lost DHCP lease */
 	transfer_data();
 	FireflyControlLoop();
 }
@@ -299,6 +302,12 @@ The complete list is shown in "MicroZed ethernet lwIP BSP working vs not working
 	SequencerIdentity_get_mac(mac_ethernet_address);
 	xil_printf("MAC address %02X:%02X:%02X:%02X:%02X:%02X\r\n", mac_ethernet_address[0], mac_ethernet_address[1],
 			mac_ethernet_address[2], mac_ethernet_address[3], mac_ethernet_address[4], mac_ethernet_address[5]);
+	/* DHCP or fixed IP address, stored in the QSPI flash; USR button held at start-up: back to DHCP (2026-11-27) */
+	NetworkSettings_init();
+	bool fixed_ip = false;
+#if (LWIP_IPV6 == 0)
+	fixed_ip = NetworkSettings_use_fixed_ip(&ipaddr, &netmask, &gw);
+#endif
 
 	lwip_init();
 
@@ -339,19 +348,28 @@ The complete list is shown in "MicroZed ethernet lwIP BSP working vs not working
 	 * Note: you must call dhcp_fine_tmr() and dhcp_coarse_tmr() at
 	 * the predefined regular intervals after starting the client.
 	 */
-	dhcp_start(echo_netif);
-	dhcp_timoutcntr = 24;
+	if (fixed_ip) {
+		xil_printf("using the fixed IP address from the network settings, no DHCP\r\n");
+	} else {
+		/* 2026-11-27: wait up to DHCP_WAIT_MS (real time; the lwIP timers run faster than nominal, see platform_zynq.c).
+		 * Without answer, use the link-local address 169.254.x.y, like a PC without DHCP server (previously: 192.168.1.10).
+		 * DHCP continues in the background and replaces the link-local address when a server answers. */
+		#define DHCP_WAIT_MS 3000
+		dhcp_start(echo_netif);
+		XTime dhcp_start_time, now;
+		XTime_GetTime(&dhcp_start_time);
+		do {
+			xemacif_input(echo_netif);
+			XTime_GetTime(&now);
+		} while ((echo_netif->ip_addr.addr == 0) && ((now - dhcp_start_time) < (XTime)DHCP_WAIT_MS * (COUNTS_PER_SECOND / 1000)));
 
-	while(((echo_netif->ip_addr.addr) == 0) && (dhcp_timoutcntr > 0))
-		xemacif_input(echo_netif);
-
-	if (dhcp_timoutcntr <= 0) {
-		if ((echo_netif->ip_addr.addr) == 0) {
-			xil_printf("DHCP Timeout\r\n");
-			xil_printf("Configuring default IP of 192.168.1.10\r\n");
-			IP4_ADDR(&(echo_netif->ip_addr),  192, 168,   1, 10);
-			IP4_ADDR(&(echo_netif->netmask), 255, 255, 255,  0);
-			IP4_ADDR(&(echo_netif->gw),      192, 168,   1,  1);
+		if (echo_netif->ip_addr.addr == 0) {
+			ip4_addr_t ll_ip, ll_netmask, ll_gw;
+			NetworkSettings_link_local_address(&ll_ip, &ll_netmask, &ll_gw);
+			netif_set_addr(echo_netif, &ll_ip, &ll_netmask, &ll_gw);
+			xil_printf("DHCP timeout after %d ms: using the link-local address\r\n", DHCP_WAIT_MS);
+		} else {
+			xil_printf("DHCP address received after %lu ms\r\n", (unsigned long)((now - dhcp_start_time) / (COUNTS_PER_SECOND / 1000)));
 		}
 	}
 

@@ -9,14 +9,16 @@
  *
  * Discovery: send the UDP datagram "OpticsFoundry_discover" to port 57979, e.g. as broadcast.
  * Each sequencer answers with one line of text to the sender's address and port:
- *   "OpticsFoundry sequencer; MAC ...; IP ...; TCP port 57978; build ...; ..."
+ *   "OpticsFoundry sequencer; MAC ...; IP ...; netmask ...; gateway ...; IP source <DHCP|fixed|link-local ...>; TCP port 57978; build ...; ..."
  * The answer is sent by unicast if the sender is in the sequencer's subnet, otherwise by broadcast,
  * so that sequencers with an IP address of another subnet can be found, too.
+ * The same UDP port receives the command OpticsFoundry_set_network, see network_settings.h.
  */
 
 #include <stddef.h>
 #include <stdbool.h>
 #include "xil_types.h"
+#include "lwip/ip_addr.h"
 
 #define SEQUENCER_TCP_PORT            57978
 #define SEQUENCER_DISCOVERY_UDP_PORT  57979
@@ -25,4 +27,6 @@
 void SequencerIdentity_get_mac(unsigned char mac[6]);       /* call before the network interface is set up */
 bool SequencerIdentity_mac_from_unique_id(void);
 void SequencerIdentity_start_discovery(void);                /* call once the network interface is up */
-void SequencerIdentity_describe(char* text, size_t size);   /* "MAC ...; IP ..." */
+void SequencerIdentity_describe(char* text, size_t size);   /* "MAC ...; IP ...; netmask ...; gateway ...; IP source ..." */
+/* sends text from the discovery port: unicast if addr is in our subnet, otherwise broadcast */
+void SequencerIdentity_udp_reply(const ip_addr_t* addr, u16_t port, const char* text);

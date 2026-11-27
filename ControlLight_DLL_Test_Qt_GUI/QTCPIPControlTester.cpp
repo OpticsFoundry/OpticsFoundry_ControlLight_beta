@@ -124,6 +124,13 @@ void QTelnetTester::on_btStopCycling_clicked()
         StopCyclingButtonPressed();
 }
 
+void QTelnetTester::on_btNetworkSettings_clicked()
+{
+    //works also without connected sequencer, to find sequencers and their IP addresses
+    if( CA.IsDLLLoaded() )
+        ShowSequencerNetworkSettings();
+}
+
 
 void QTelnetTester::addText(const char *msg, int count)
 {

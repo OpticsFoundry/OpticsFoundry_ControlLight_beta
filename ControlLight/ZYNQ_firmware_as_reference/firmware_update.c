@@ -24,6 +24,7 @@
 #include "firmware_update.h"
 #include "sequencer_identity.h"
 #include "sd_installer.h"
+#include "network_settings.h"
 
 extern bool DebugModeOn;
 extern void RunEventLoop();
@@ -38,6 +39,7 @@ extern struct tcp_pcb *last_tpcb;
 #define FLASH_CMD_READ_STATUS    0x05
 #define FLASH_CMD_WRITE_ENABLE   0x06
 #define FLASH_CMD_SECTOR_ERASE   0xD8   /* 64 KB sector */
+#define FLASH_CMD_SUBSECTOR_ERASE 0x20  /* 4 KB subsector */
 #define FLASH_CMD_READ_ID        0x9F
 #define FLASH_CMD_READ_UNIQUE_ID 0x4B   /* Winbond: 4 dummy bytes, then 64 bit unique ID */
 
@@ -56,6 +58,8 @@ extern struct tcp_pcb *last_tpcb;
 #define BACKUP_IMAGE_MAX_SIZE    (QSPI_SETTINGS_OFFSET - QSPI_BACKUP_IMAGE_OFFSET)
 
 #define SECTOR_ERASE_TIMEOUT_MS  5000
+#define SUBSECTOR_ERASE_TIMEOUT_MS 1000
+#define FLASH_SUBSECTOR_SIZE     0x1000
 #define PAGE_PROGRAM_TIMEOUT_MS  50
 #define RECEIVE_TIMEOUT_MS       120000
 
@@ -208,6 +212,14 @@ static bool FlashProgramPage(u32 address, const u8* data, u32 length) {
 	return FlashWaitWhileBusy(PAGE_PROGRAM_TIMEOUT_MS, /*service_network*/ false);
 }
 
+static bool FlashEraseSubsector(u32 address) {
+	u8 tx[FLASH_CMD_OVERHEAD];
+	SetCommandAndAddress(tx, FLASH_CMD_SUBSECTOR_ERASE, address);
+	FlashWriteEnable();
+	XQspiPs_PolledTransfer(&Qspi, tx, NULL, sizeof(tx));
+	return FlashWaitWhileBusy(SUBSECTOR_ERASE_TIMEOUT_MS, /*service_network*/ false);
+}
+
 /* length <= FLASH_READ_CHUNK; returns pointer to the data read */
 static const u8* FlashRead(u32 address, u32 length) {
 	memset(QspiTx, 0, length + FLASH_CMD_OVERHEAD);
@@ -348,17 +360,46 @@ void FirmwareUpdate_describe(char* text, size_t size) {
 			FlashJedecId[0], FlashJedecId[1], FlashJedecId[2], unique_id);
 }
 
+/* ---------------- settings sector (see firmware_update.h) ---------------- */
+
+static bool SettingsAccessOk(u32 offset, u32 length, u32 max_length) {
+	FirmwareUpdate_init();
+	if (!QspiReady || FlashOperationInProgress) return false;
+	if (FlashUsableSize(FlashJedecId) < FLASH_MAX_SIZE_3BYTE) return false;
+	if ((length == 0) || (length > max_length)) return false;
+	if ((offset >= QSPI_SETTINGS_SIZE) || (length > QSPI_SETTINGS_SIZE - offset)) return false;
+	return true;
+}
+
+bool FirmwareUpdate_read_settings(u32 offset, u8* data, u32 length) {
+	if (!SettingsAccessOk(offset, length, FLASH_READ_CHUNK)) return false;
+	memcpy(data, FlashRead(QSPI_SETTINGS_OFFSET + offset, length), length);
+	return true;
+}
+
+bool FirmwareUpdate_write_settings(u32 offset, const u8* data, u32 length) {
+	if ((offset % FLASH_SUBSECTOR_SIZE) != 0) return false;
+	if (!SettingsAccessOk(offset, length, FLASH_PAGE_SIZE)) return false;
+	if (FlashReadStatus() & FLASH_STATUS_BP_MASK) return false;
+	const u32 address = QSPI_SETTINGS_OFFSET + offset;
+	FlashOperationInProgress = true;
+	bool ok = FlashEraseSubsector(address) && FlashProgramPage(address, data, length);
+	ok = ok && (memcmp(FlashRead(address, length), data, length) == 0);
+	FlashOperationInProgress = false;
+	return ok;
+}
+
 /* ---------------- Ethernet command handlers ---------------- */
 
 void FirmwareUpdate_send_firmware_info(void) {
 	char firmware[256];
-	char identity[160];
+	char identity[300];
 	char sd_install[200];
 	FirmwareUpdate_describe(firmware, sizeof(firmware));
 	SequencerIdentity_describe(identity, sizeof(identity));
 	SdInstaller_describe(sd_install, sizeof(sd_install));
-	SendLine("OpticsFoundry Z-turn sequencer firmware; %s; %s%s; supports update_firmware_qspi, update_backup_firmware_qspi, test_backup_boot, install_from_sd, read_firmware_image, reboot_system, discovery, interrupt_wait",
-			firmware, identity, sd_install);
+	SendLine("OpticsFoundry Z-turn sequencer firmware; %s; %s%s; USR button %s; supports update_firmware_qspi, update_backup_firmware_qspi, test_backup_boot, install_from_sd, read_firmware_image, reboot_system, discovery, interrupt_wait, network_settings",
+			firmware, identity, sd_install, UserButton_pressed() ? "pressed" : "released");
 }
 
 /* verify flash against data, returns false and sends an error line on mismatch */

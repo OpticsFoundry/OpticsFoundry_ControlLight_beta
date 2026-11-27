@@ -18,6 +18,7 @@
 #include "xtime_l.h"
 
 #include "xgpiops.h"
+#include "network_settings.h"
 
 #include "netif/xadapter.h"
 
@@ -2610,6 +2611,10 @@ void FireflyControlLoop() {
 			FirmwareUpdate_send_image((u8*)(DDR_MODIFY_BUFFER_START), DDR_MODIFY_BUFFER_LENGTH_IN_BYTES, Sequence_running);
 		} else if (strcmp(command,"reboot_system") == 0) {
 			FirmwareUpdate_reboot();
+		} else if (strcmp(command,"get_network_settings") == 0) {
+			NetworkSettings_get_command();
+		} else if (strcmp(command,"set_network_settings") == 0) {
+			NetworkSettings_set_command(Sequence_running);
 		} else
 			if (DebugModeOn) xil_printf("Command not recognized (%s)\r\n", command);
 	}

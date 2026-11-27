@@ -33,10 +33,13 @@ typedef int SocketHandle;
 #include <chrono>
 #include <cstring>
 #include <set>
+#include <cctype>
 
 static const unsigned short DiscoveryPort = 57979;
 static const char* DiscoveryRequest = "OpticsFoundry_discover";
 static const char* DiscoveryAnswerPrefix = "OpticsFoundry sequencer";
+static const char* SetNetworkRequest = "OpticsFoundry_set_network";
+static const char* SetNetworkAnswerPrefix = "OpticsFoundry set_network";
 
 // IPv4 broadcast addresses (network byte order) of all active interfaces, plus the limited broadcast address
 static std::vector<unsigned long> GetBroadcastAddresses() {
@@ -86,8 +89,12 @@ static std::string MacOf(const std::string& answer) {
 	return answer.substr(start, (end == std::string::npos) ? std::string::npos : end - start);
 }
 
-bool DiscoverSequencers(std::vector<std::string>& sequencers, double timeout_in_seconds, std::string& error) {
-	sequencers.clear();
+// Sends request as UDP broadcast to the discovery port on every network interface and collects the answers that start
+// with answer_prefix (without line end; duplicates, identified by their MAC field, are removed). If stop_after_first_answer,
+// returns as soon as one answer has arrived. Returns false only if the request couldn't be sent at all.
+static bool BroadcastRequest(const std::string& request, const char* answer_prefix, double timeout_in_seconds, bool stop_after_first_answer,
+		std::vector<std::string>& answers, std::string& error) {
+	answers.clear();
 	error.clear();
 #ifdef _WIN32
 	WSADATA wsa_data;
@@ -125,10 +132,10 @@ bool DiscoverSequencers(std::vector<std::string>& sequencers, double timeout_in_
 			destination.sin_family = AF_INET;
 			destination.sin_addr.s_addr = address;
 			destination.sin_port = htons(DiscoveryPort);
-			if (sendto(s, DiscoveryRequest, static_cast<int>(std::strlen(DiscoveryRequest)), 0, reinterpret_cast<sockaddr*>(&destination), sizeof(destination)) > 0) sent_ok++;
+			if (sendto(s, request.c_str(), static_cast<int>(request.size()), 0, reinterpret_cast<sockaddr*>(&destination), sizeof(destination)) > 0) sent_ok++;
 		}
 		if (sent_ok == 0) {
-			error = "couldn't send discovery request on any network interface";
+			error = "couldn't send the UDP broadcast on any network interface";
 			ok = false;
 		}
 	}
@@ -159,8 +166,9 @@ bool DiscoverSequencers(std::vector<std::string>& sequencers, double timeout_in_
 			buffer[received] = 0;
 			std::string answer(buffer);
 			while (!answer.empty() && ((answer.back() == '\n') || (answer.back() == '\r'))) answer.pop_back();
-			if (answer.compare(0, std::strlen(DiscoveryAnswerPrefix), DiscoveryAnswerPrefix) != 0) continue;
-			if (known.insert(MacOf(answer)).second) sequencers.push_back(answer);
+			if (answer.compare(0, std::strlen(answer_prefix), answer_prefix) != 0) continue;
+			if (known.insert(MacOf(answer)).second) answers.push_back(answer);
+			if (stop_after_first_answer) break;
 		}
 	}
 	if (s != INVALID_SOCKET_HANDLE) CloseSocketHandle(s);
@@ -168,4 +176,47 @@ bool DiscoverSequencers(std::vector<std::string>& sequencers, double timeout_in_
 	WSACleanup();
 #endif
 	return ok;
+}
+
+bool DiscoverSequencers(std::vector<std::string>& sequencers, double timeout_in_seconds, std::string& error) {
+	return BroadcastRequest(DiscoveryRequest, DiscoveryAnswerPrefix, timeout_in_seconds, /*stop_after_first_answer*/ false, sequencers, error);
+}
+
+// "02:4f:46:4c:b5:52", "02-4F-46-4C-B5-52" -> "02:4F:46:4C:B5:52"; false if not a MAC address
+static bool NormalizeMac(const std::string& text, std::string& mac) {
+	std::string hex;
+	for (char c : text) {
+		if (std::isxdigit(static_cast<unsigned char>(c))) hex += static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+		else if ((c != ':') && (c != '-') && (c != ' ')) return false;
+	}
+	if (hex.size() != 12) return false;
+	mac.clear();
+	for (size_t i = 0; i < 12; i += 2) {
+		if (i > 0) mac += ':';
+		mac += hex.substr(i, 2);
+	}
+	return true;
+}
+
+bool SetSequencerNetworkByMAC(const std::string& mac_address, const std::string& settings, double timeout_in_seconds, std::string& answer, std::string& error) {
+	answer.clear();
+	std::string mac;
+	if (!NormalizeMac(mac_address, mac)) {
+		error = "invalid MAC address \"" + mac_address + "\" (expected e.g. 02:4F:46:4C:B5:52)";
+		return false;
+	}
+	std::vector<std::string> answers;
+	if (!BroadcastRequest(std::string(SetNetworkRequest) + " " + mac + " " + settings, SetNetworkAnswerPrefix, timeout_in_seconds,
+			/*stop_after_first_answer*/ true, answers, error)) return false;
+	for (const std::string& a : answers) {
+		if (a.find("MAC " + mac) == std::string::npos) continue;
+		answer = a;
+		size_t result = a.find("; ", a.find("MAC "));
+		std::string status = (result == std::string::npos) ? a : a.substr(result + 2);
+		if (status.rfind("OK", 0) == 0) return true;
+		error = "sequencer " + mac + " refused: " + status;
+		return false;
+	}
+	error = "no answer from sequencer " + mac + " (wrong MAC address, sequencer not connected, or firmware older than 2026-11-27)";
+	return false;
 }

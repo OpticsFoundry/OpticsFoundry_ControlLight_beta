@@ -9,5 +9,6 @@ bool ExecuteTestSequence();
 bool CycleSequence();
 bool CycleSequenceWithIndividualCommandUpdate();
 bool StopCyclingButtonPressed();
+bool ShowSequencerNetworkSettings();
 
 #endif // TESTSEQUENCE_H

@@ -123,6 +123,9 @@ public:
 	bool SaveFirmware(const std::string& BootImageFileName, std::string& report);
 	bool CopyFirmwareToSDCard(const std::string& SDCardPath, std::string& report);
 	bool Reboot();
+	bool GetNetworkSettings(std::string& info);
+	//settings: "dhcp" or "fixed <IP> <netmask> [<gateway>]"; stores them in the sequencer and reboots it, so that they take effect
+	bool SetNetworkSettingsAndReboot(const std::string& settings, std::string& report);
 	void SetSequencerDigitalOut(uint8_t dig_out_pattern);
 	void SetSequencer_PL_to_PS_command(uint8_t PL_to_PS_command);
 	void SwitchSequencerBuzzer(bool OnOff);

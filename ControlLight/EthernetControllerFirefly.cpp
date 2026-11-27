@@ -1896,6 +1896,43 @@ bool CEthernetControllerFirefly::RebootSystem() {
 	return ok;
 }
 
+bool CEthernetControllerFirefly::GetNetworkSettings(std::string& info) {
+	info = "";
+	if (!Connected) return false;
+	if (!Command("get_network_settings")) return false;
+	CString answer;
+	if (!GetCommand(answer, /*timeout_in_seconds*/ 3)) {
+		AddErrorMessage("CEthernetControllerFirefly::GetNetworkSettings : no answer. Sequencer firmware older than 2026-11-27 doesn't support this command.");
+		return false;
+	}
+	info = CStringToStdString(answer);
+	if (info.rfind("OK ", 0) == 0) info = info.substr(3);
+	return true;
+}
+
+bool CEthernetControllerFirefly::SetNetworkSettings(const std::string& settings, std::string& report) {
+	report = "";
+	if (!Connected) {
+		report = "not connected to sequencer";
+		return false;
+	}
+	if (!Command("set_network_settings")) {
+		report = "sequencer didn't accept command set_network_settings";
+		return false;
+	}
+	if (!WriteString(CString(settings.c_str()))) {
+		report = "error sending the network settings";
+		return false;
+	}
+	CString answer;
+	if (!GetCommand(answer, /*timeout_in_seconds*/ 5)) {
+		report = "no answer from sequencer. Sequencer firmware older than 2026-11-27 doesn't support network settings.";
+		return false;
+	}
+	report = CStringToStdString(answer);
+	return (report.rfind("OK", 0) == 0);
+}
+
 
 const unsigned int BusBitShift = 8;
 const unsigned int BusSequencerSpecialCommand = 0x7 << BusBitShift;

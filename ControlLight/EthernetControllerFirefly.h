@@ -127,6 +127,9 @@ public:
 	bool UpdateFirmwareQSPI(const uint8_t* image, uint32_t size, std::string& report, bool backup_image = false);
 	bool ReadFirmwareImage(std::vector<uint8_t>& image, std::string& report);
 	bool RebootSystem();
+	//network settings (sequencer firmware from 2026-11-27 on)
+	bool GetNetworkSettings(std::string& info);
+	bool SetNetworkSettings(const std::string& settings, std::string& report); //settings: "dhcp" or "fixed <IP> <netmask> [<gateway>]"
 
 	void DebugBuffer(const std::string& filename);
 	void AddSequencerCommandToBuffer(uint32_t* buffer, uint32_t n, uint32_t high_buffer, uint32_t low_buffer);

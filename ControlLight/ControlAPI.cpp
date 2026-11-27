@@ -221,6 +221,13 @@ bool CLA_InitializeMFC(bool InitializeAfx, bool InitializeAfxSocket) {
 	static bool initialized = false;
 	static bool created = false;
 
+	//settings text for the sequencer command set_network_settings, see ZYNQ_firmware_as_reference/network_settings.h
+	static std::string FixedIPSettingsText(const char* IP, const char* Netmask, const char* Gateway) {
+		std::string text = std::string("fixed ") + IP + " " + Netmask;
+		if (Gateway && (Gateway[0] != 0)) text += std::string(" ") + Gateway;
+		return text;
+	}
+
 #ifdef C_API
 #ifdef __cplusplus
 	extern "C" {
@@ -1468,6 +1475,68 @@ bool CLA_InitializeMFC(bool InitializeAfx, bool InitializeAfxSocket) {
 			}
 			bool ok = sequencer->Reboot();
 			API_UNLOCK_RETURN_ERROR(ok && !NewErrorOccured, "CLA_RebootSequencer: error");
+		}
+
+		API_EXPORT ERROR_CODE_TYPE CLA_FNDEF(GetSequencerNetworkSettings)(const unsigned int& Sequencer, char* info, size_t& length) {
+			API_LOCK_GUARD;
+			CDeviceSequencer* sequencer = GetSequencer(Sequencer);
+			if (!sequencer) {
+				API_UNLOCK_RETURN_ERROR(false, "CLA_GetSequencerNetworkSettings: Invalid sequencer");
+			}
+			std::string text;
+			bool ok = sequencer->GetNetworkSettings(text);
+			if (info && (length > 0)) {
+				size_t copied = text.copy(info, (text.size() < length - 1) ? text.size() : length - 1);
+				info[copied] = 0;
+			}
+			length = text.size();
+			API_UNLOCK_RETURN_ERROR(ok && !NewErrorOccured, "CLA_GetSequencerNetworkSettings: error");
+		}
+
+
+		API_EXPORT ERROR_CODE_TYPE CLA_FNDEF(SetSequencerFixedIP)(const unsigned int& Sequencer, const char* IP, const char* Netmask, const char* Gateway) {
+			API_LOCK_GUARD;
+			CDeviceSequencer* sequencer = GetSequencer(Sequencer);
+			if (!sequencer) {
+				API_UNLOCK_RETURN_ERROR(false, "CLA_SetSequencerFixedIP: Invalid sequencer");
+			}
+			if (!IP || !Netmask || (IP[0] == 0) || (Netmask[0] == 0)) {
+				API_UNLOCK_RETURN_ERROR(false, "CLA_SetSequencerFixedIP: IP address and netmask are needed");
+			}
+			std::string report;
+			bool ok = sequencer->SetNetworkSettingsAndReboot(FixedIPSettingsText(IP, Netmask, Gateway), report);
+			API_UNLOCK_RETURN_ERROR(ok && !NewErrorOccured, "CLA_SetSequencerFixedIP: " + report);
+		}
+
+		API_EXPORT ERROR_CODE_TYPE CLA_FNDEF(SetSequencerDHCP)(const unsigned int& Sequencer) {
+			API_LOCK_GUARD;
+			CDeviceSequencer* sequencer = GetSequencer(Sequencer);
+			if (!sequencer) {
+				API_UNLOCK_RETURN_ERROR(false, "CLA_SetSequencerDHCP: Invalid sequencer");
+			}
+			std::string report;
+			bool ok = sequencer->SetNetworkSettingsAndReboot("dhcp", report);
+			API_UNLOCK_RETURN_ERROR(ok && !NewErrorOccured, "CLA_SetSequencerDHCP: " + report);
+		}
+
+		API_EXPORT ERROR_CODE_TYPE CLA_FNDEF(SetSequencerFixedIPByMAC)(const char* MAC, const char* IP, const char* Netmask, const char* Gateway) {
+			API_LOCK_GUARD;
+			if (!MAC || !IP || !Netmask || (IP[0] == 0) || (Netmask[0] == 0)) {
+				API_UNLOCK_RETURN_ERROR(false, "CLA_SetSequencerFixedIPByMAC: MAC address, IP address and netmask are needed");
+			}
+			std::string answer, error;
+			bool ok = ::SetSequencerNetworkByMAC(MAC, FixedIPSettingsText(IP, Netmask, Gateway), /*timeout_in_seconds*/ 2.0, answer, error);
+			API_UNLOCK_RETURN_ERROR(ok, "CLA_SetSequencerFixedIPByMAC: " + error);
+		}
+
+		API_EXPORT ERROR_CODE_TYPE CLA_FNDEF(SetSequencerDHCPByMAC)(const char* MAC) {
+			API_LOCK_GUARD;
+			if (!MAC) {
+				API_UNLOCK_RETURN_ERROR(false, "CLA_SetSequencerDHCPByMAC: no MAC address given");
+			}
+			std::string answer, error;
+			bool ok = ::SetSequencerNetworkByMAC(MAC, "dhcp", /*timeout_in_seconds*/ 2.0, answer, error);
+			API_UNLOCK_RETURN_ERROR(ok, "CLA_SetSequencerDHCPByMAC: " + error);
 		}
 
 		API_EXPORT ERROR_CODE_TYPE CLA_FNDEF(WriteConfigEEPROM)(uint8_t SequencerID, uint8_t RackNr, uint8_t SlotNr, const char* data, size_t length) {

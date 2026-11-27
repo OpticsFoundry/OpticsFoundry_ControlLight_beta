@@ -5,7 +5,8 @@
  * QSPI flash layout (16 MB):
  *   0x000000  primary boot image, written by update_firmware_qspi      (max 8 MB)
  *   0x800000  backup boot image, written by update_backup_firmware_qspi (max 8 MB - 64 KB)
- *   0xFF0000  settings sector (reserved)
+ *   0xFF0000  settings sector (64 KB): two copies of the settings record in the 4 KB subsectors at
+ *             0xFF0000 and 0xFF1000, see network_settings.h
  *
  * The Zynq BootROM boots the first valid boot image it finds, searching the flash in
  * 32 KB steps from offset 0. Images are written with their boot header (first flash page)
@@ -54,6 +55,7 @@
 #define QSPI_PRIMARY_IMAGE_OFFSET  0x000000
 #define QSPI_BACKUP_IMAGE_OFFSET   0x800000
 #define QSPI_SETTINGS_OFFSET       0xFF0000
+#define QSPI_SETTINGS_SIZE         0x10000
 
 void FirmwareUpdate_send_firmware_info(void);
 void FirmwareUpdate_update_qspi(u8* buffer, u32 buffer_size_in_bytes, bool sequence_running, bool backup_image);
@@ -72,6 +74,13 @@ bool FirmwareUpdate_read_flash_unique_id(u8 unique_id[8]);  /* false if the flas
 void FirmwareUpdate_describe(char* text, size_t size);
 
 u32 FirmwareUpdate_crc32(const u8* data, u32 length);  /* zlib / IEEE 802.3 CRC32 */
+
+/* Settings sector access; offset is relative to QSPI_SETTINGS_OFFSET. Both return false if the flash is busy with another
+ * operation, not available or write protected. Reading: length <= 4096 bytes.
+ * Writing: erases the 4 KB subsector starting at offset (must be 4 KB aligned), programs length <= 256 bytes and verifies them.
+ * Doesn't service the network (takes typically 50 ms, at most about 1 s). */
+bool FirmwareUpdate_read_settings(u32 offset, u8* data, u32 length);
+bool FirmwareUpdate_write_settings(u32 offset, const u8* data, u32 length);
 
 /* Writes a boot image into both QSPI slots (primary first), skipping slots that already contain it.
  * use_network: report progress to the connected PC and service the network while writing (false at start-up).

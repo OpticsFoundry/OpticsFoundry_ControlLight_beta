@@ -87,38 +87,53 @@ void dhcp_fine_tmr();
 void dhcp_coarse_tmr();
 #endif
 
+/*
+ * Timer periods (2026-11-27)
+ * The timer interrupt runs every 1/TIMER_TICKS_PER_SECOND s (about 2 ms), much faster than lwIP's nominal 250 ms,
+ * so that tcp_fasttmr sends delayed ACKs within 2 ms (fast command round trips) and for the status LED timing
+ * (FireflyFastLoop). Incoming packets don't depend on this timer: RunEventLoop polls the EMAC on every pass.
+ * tcp_slowtmr (retransmissions, connection timeouts) runs every TCP_SLOW_TIMER_MS: 10x faster than lwIP's nominal
+ * 500 ms, so that a lost segment is retransmitted after about 100-150 ms (well within an experimental cycle), but no
+ * longer at the interrupt rate (128x too fast), which retransmitted after a few ms and gave up a connection after
+ * about 1 s without ACK from the PC. The DHCP timers run at their nominal periods (fine 500 ms, coarse 60 s);
+ * before, DHCP leases expired 128x too early.
+ */
+#define TIMER_DIVIDER            (8*128)             /* timer load value = CPU clock / TIMER_DIVIDER; the timer counts at CPU clock / 2 */
+#define TIMER_TICKS_PER_SECOND   (TIMER_DIVIDER / 2) /* 512 */
+#define TCP_SLOW_TIMER_MS        50
+#define DHCP_FINE_TIMER_MS       500                 /* lwIP DHCP_FINE_TIMER_MSECS */
+#define DHCP_COARSE_PER_FINE     120                 /* 60 s, lwIP DHCP_COARSE_TIMER_SECS */
+
 void
 timer_callback(XScuTimer * TimerInstance)
 {
 	static int DetectEthLinkStatus = 0;
-	/* we need to call tcp_fasttmr & tcp_slowtmr at intervals specified
-	 * by lwIP. It is not important that the timing is absoluetly accurate.
-	 */
-	static int odd = 1;
+	static int tcp_slow_ticks = 0;
 #if LWIP_DHCP==1
-    static int dhcp_timer = 0;
+	static int dhcp_fine_ticks = 0;
+	static int dhcp_timer = 0;
 #endif
 	DetectEthLinkStatus++;
-	 TcpFastTmrFlag = 1;
+	TcpFastTmrFlag = 1;
 
-	odd = !odd;
 #ifndef USE_SOFTETH_ON_ZYNQ
 	ResetRxCntr++;
 #endif
-	if (odd) {
-#if LWIP_DHCP==1
-		dhcp_timer++;
-		dhcp_timoutcntr--;
-#endif
+	if (++tcp_slow_ticks >= (TCP_SLOW_TIMER_MS * TIMER_TICKS_PER_SECOND) / 1000) {
+		tcp_slow_ticks = 0;
 		TcpSlowTmrFlag = 1;
+	}
 #if LWIP_DHCP==1
+	if (++dhcp_fine_ticks >= (DHCP_FINE_TIMER_MS * TIMER_TICKS_PER_SECOND) / 1000) {
+		dhcp_fine_ticks = 0;
+		dhcp_timoutcntr--;
 		dhcp_fine_tmr();
-		if (dhcp_timer >= 120) {
+		if (++dhcp_timer >= DHCP_COARSE_PER_FINE) {
 			dhcp_coarse_tmr();
 			dhcp_timer = 0;
 		}
-#endif
 	}
+#endif
 
 	/* For providing an SW alternative for the SI #692601. Under heavy
 	 * Rx traffic if at some point the Rx path becomes unresponsive, the
@@ -169,9 +184,9 @@ void platform_setup_timer(void)
 
 	XScuTimer_EnableAutoReload(&TimerInstance);
 	/*
-	 * Set for 250 milli seconds timeout.
+	 * Xilinx default: CPU clock / 8 = 250 ms. Here about 2 ms, see TIMER_DIVIDER and the comment above timer_callback.
 	 */
-	TimerLoadValue = XPAR_CPU_CORTEXA9_0_CPU_CLK_FREQ_HZ / (8*128);/// 8;  128 might be too much //ToDo: adjust to make as responsive as needed, but not too fast in order to not waste time on ethernet pulling checks
+	TimerLoadValue = XPAR_CPU_CORTEXA9_0_CPU_CLK_FREQ_HZ / TIMER_DIVIDER;
 
 	XScuTimer_LoadTimer(&TimerInstance, TimerLoadValue);
 	return;

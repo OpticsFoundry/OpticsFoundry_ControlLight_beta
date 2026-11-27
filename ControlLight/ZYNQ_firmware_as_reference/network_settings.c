@@ -389,7 +389,8 @@ void NetworkSettings_describe_current(char* text, size_t size) {
 /* ---------------- TCP commands ---------------- */
 
 static void SendLine(const char* text) {
-	xil_printf("%s\r\n", text);
+	/* only in debug mode: the UART at 115200 baud blocks for about 87 us per character, which would delay the answer */
+	if (DebugModeOn) xil_printf("%s\r\n", text);
 	server_send_ascii((char*)text);
 	server_send_ascii("\n");
 	if (last_tpcb) tcp_output(last_tpcb);

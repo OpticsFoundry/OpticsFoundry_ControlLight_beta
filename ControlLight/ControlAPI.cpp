@@ -348,14 +348,17 @@ bool CLA_InitializeMFC(bool InitializeAfx, bool InitializeAfxSocket) {
 
 #ifdef THROW_EXCEPTIONS
 
+//success is evaluated once, before unlocking. 2026-11-27: it is parenthesized; before, "!ok && !NewErrorOccured" was
+//evaluated as "(!ok) && (!NewErrorOccured)", so a call that recorded an error but returned ok didn't throw.
 #define API_UNLOCK_RETURN_ERROR(success, error_message) \
+    bool __ret = (success); \
     API_UNLOCK; \
-    if (!success) throw CLA_Exception(error_message); \
+    if (!__ret) throw CLA_Exception(error_message); \
 	return;
 
 #define RETURN_ERROR(success, error_message) \
-    if (!success) throw CLA_Exception(error_message); \
-	return success;
+    if (!(success)) throw CLA_Exception(error_message); \
+	return true;
 
 
 #else

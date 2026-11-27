@@ -236,7 +236,7 @@ public:
 
     /// @brief Copy the firmware of the sequencer onto an SD card (in the PC's card reader), creating an installer SD card.
     /// Writes the firmware boot image read from the sequencer's QSPI flash as BOOT.BIN, plus the empty marker file INSTALL, into SDCardPath.
-    /// Booting another Z-turn from that card (boot mode jumpers on SD card) copies the firmware into its QSPI flash.
+    /// Booting another Z-turn from that card (boot mode jumpers on SD card) copies the firmware into its QSPI flash, which takes about 30 s.
     /// The card must be formatted with FAT32 (or FAT16). Eject the card safely before removing it from the PC.
     /// Needs sequencer firmware from 2026-11-26 (evening) on.
     /// @param Sequencer the sequencer number.

@@ -364,6 +364,9 @@ err_t server_send_ascii(char* buf) {
 		}
 	}
 	err_t err = tcp_write(last_tpcb, buf, plen, TCP_WRITE_FLAG_COPY);
+	/* 2026-11-27: send at once. Answers are written outside of lwIP's receive processing, so nothing else sends them
+	 * promptly: before, they waited for the next lwIP poll in tcp_slowtmr (every 4 ms then, 50 ms now). */
+	if (err == ERR_OK) tcp_output(last_tpcb);
 	if (DebugModeOn) xil_printf("server_send_ascii: sending %s\r\n",buf);
 	return err;
 }
@@ -462,6 +465,10 @@ err_t accept_callback(void *arg, struct tcp_pcb *newpcb, err_t err)
 	tcp_arg(newpcb, newpcb);
 	tcp_recv(newpcb, recv_callback);
 	tcp_err(newpcb, error_callback);
+	/* 2026-11-27: no Nagle algorithm: send each answer at once instead of holding small segments back until the PC has
+	 * acknowledged the previous one (e.g. "Ready"), which the PC may delay. Before, premature retransmissions (tcp_slowtmr
+	 * ran every 4 ms) hid this; with a 50 ms tcp_slowtmr it delayed about 1% of the answers by 30-50 ms. */
+	tcp_nagle_disable(newpcb);
 
 	echo_connection++;
 	client_connected = 1;

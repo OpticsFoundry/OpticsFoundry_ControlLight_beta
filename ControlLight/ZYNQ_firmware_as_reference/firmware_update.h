@@ -89,3 +89,7 @@ bool FirmwareUpdate_write_settings(u32 offset, const u8* data, u32 length);
 #define FIRMWARE_INSTALL_WRITTEN     1
 #define FIRMWARE_INSTALL_UP_TO_DATE  2
 int FirmwareUpdate_install_image(const u8* image, u32 size, bool use_network, char* summary, size_t summary_size);
+
+/* Optional callback, called once per 64 KB flash block while erasing, programming, verifying or comparing a boot image
+ * (every 20 to 220 ms), e.g. to blink an LED. NULL: none. */
+void FirmwareUpdate_set_progress_callback(void (*callback)(void));

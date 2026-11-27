@@ -1514,7 +1514,7 @@ void DemoDiscoverSequencers() {
 void DemoCopySequencerFirmwareToSDCard() {
 	//Creates an installer SD card with the firmware of sequencer 0: writes its firmware as BOOT.BIN plus the marker file INSTALL
 	//onto the SD card in this PC's card reader. Booting another Z-turn from that card (boot mode SD card: JP1 open, JP2 closed)
-	//installs the firmware into its QSPI flash (about 30 s, until two short beeps); afterwards set both jumpers to closed. Needs sequencer firmware from 2026-11-26 on.
+	//installs the firmware into its QSPI flash (about 50 s, LED blinking blue, until two short beeps); afterwards set both jumpers to closed. Needs sequencer firmware from 2026-11-26 on.
 	const char* SDCardPath = "E:\\";  //root folder of the SD card (FAT32)
 	if (!InitializeSystem()) {
 		return;

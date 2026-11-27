@@ -103,6 +103,17 @@ static bool FlashOperationInProgress = false;
 /* false while installing from SD card at start-up, before the network exists: reports only go to the UART */
 static bool UseNetwork = true;
 
+/* called once per 64 KB flash block while erasing, programming, verifying and comparing images, see firmware_update.h */
+static void (*ProgressCallback)(void) = NULL;
+
+void FirmwareUpdate_set_progress_callback(void (*callback)(void)) {
+	ProgressCallback = callback;
+}
+
+static void Progress(void) {
+	if (ProgressCallback) ProgressCallback();
+}
+
 static void ServiceNetwork(void) {
 	if (UseNetwork) RunEventLoop();
 }
@@ -414,7 +425,10 @@ static bool VerifyFlash(u32 flash_address, const u8* data, u32 length, const cha
 					(unsigned long)(flash_address + done + i), flash[i], data[done + i], recovery_hint);
 			return false;
 		}
-		if (((flash_address + done) % FLASH_SECTOR_SIZE) == 0) ServiceNetwork();
+		if (((flash_address + done) % FLASH_SECTOR_SIZE) == 0) {
+			Progress();
+			ServiceNetwork();
+		}
 	}
 	return true;
 }
@@ -430,6 +444,7 @@ static bool WriteImageToSlot(u32 slot_offset, const u8* image, u32 size, const c
 	XTime_GetTime(&t0);
 	u32 sectors = (size + FLASH_SECTOR_SIZE - 1) / FLASH_SECTOR_SIZE;
 	for (u32 sector = 0; sector < sectors; sector++) {
+		Progress();
 		if (!FlashEraseSector(slot_offset + sector * FLASH_SECTOR_SIZE)) {
 			SendLine("ERROR update_firmware_qspi: erasing sector at 0x%06lX timed out. %s", (unsigned long)(slot_offset + sector * FLASH_SECTOR_SIZE), recovery_hint);
 			return false;
@@ -447,7 +462,10 @@ static bool WriteImageToSlot(u32 slot_offset, const u8* image, u32 size, const c
 				return false;
 			}
 		}
-		if ((address % FLASH_SECTOR_SIZE) == 0) ServiceNetwork();
+		if ((address % FLASH_SECTOR_SIZE) == 0) {
+			Progress();
+			ServiceNetwork();
+		}
 	}
 	u32 program_ms = ElapsedMs(t0);
 
@@ -562,7 +580,10 @@ static bool SlotContainsImage(u32 slot_offset, const u8* image, u32 size) {
 	for (u32 done = 0; done < size; done += FLASH_READ_CHUNK) {
 		u32 chunk = ((size - done) < FLASH_READ_CHUNK) ? (size - done) : FLASH_READ_CHUNK;
 		if (memcmp(FlashRead(slot_offset + done, chunk), image + done, chunk) != 0) return false;
-		if (((slot_offset + done) % FLASH_SECTOR_SIZE) == 0) ServiceNetwork();
+		if (((slot_offset + done) % FLASH_SECTOR_SIZE) == 0) {
+			Progress();
+			ServiceNetwork();
+		}
 	}
 	return true;
 }

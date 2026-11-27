@@ -10,7 +10,7 @@
  * both QSPI image slots (primary, then backup) before it starts the network, and verifies them. Slots that
  * already contain the image are not written again. Without the INSTALL file, booting from SD card works
  * as usual and the QSPI flash isn't touched.
- * Installing takes about 30 s. Signals: RGB LED blue while installing, then green and two short beeps (installed) or one short beep
+ * Installing takes about 50 s. Signals: RGB LED blinking blue while installing (toggles with each 64 KB flash block), then green and two short beeps (installed) or one short beep
  * (QSPI flash already up to date); red and three long beeps on failure. Details on the USB UART (115200 baud)
  * and in the firmware info (get_firmware_info).
  *

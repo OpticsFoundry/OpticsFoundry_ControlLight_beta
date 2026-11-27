@@ -287,6 +287,20 @@ static void Beep(int count, u32 on_ms, u32 off_ms) {
 	}
 }
 
+/* blue status LED toggles with each flash block written or checked, but at most every 100 ms, so that the user sees that the installation is progressing */
+#define BLINK_MIN_INTERVAL_MS 100
+static bool BlinkLedOn = true;
+static XTime BlinkLastToggle = 0;
+
+static void BlinkProgress(void) {
+	XTime now;
+	XTime_GetTime(&now);
+	if ((now - BlinkLastToggle) < (XTime)BLINK_MIN_INTERVAL_MS * (COUNTS_PER_SECOND / 1000)) return;
+	BlinkLastToggle = now;
+	BlinkLedOn = !BlinkLedOn;
+	SetLED0Color(0, 0, BlinkLedOn ? 1 : 0);
+}
+
 void SdInstaller_run_at_boot(void) {
 	if ((Xil_In32(SLCR_BOOT_MODE) & BOOT_MODE_MASK) != BOOT_MODE_SD) return;
 	u32 buffer_size;
@@ -306,7 +320,10 @@ void SdInstaller_run_at_boot(void) {
 	int result = FIRMWARE_INSTALL_FAILED;
 	if (read_ok) {
 		xil_printf("SD card installer: BOOT.BIN %lu bytes (%s)\r\n", (unsigned long)size, fat32 ? "FAT32" : "FAT16");
+		XTime_GetTime(&BlinkLastToggle);
+		FirmwareUpdate_set_progress_callback(BlinkProgress);
 		result = FirmwareUpdate_install_image(buffer, size, /*use_network*/ false, summary, sizeof(summary));
+		FirmwareUpdate_set_progress_callback(NULL);
 	} else {
 		snprintf(summary, sizeof(summary), "failed: %s", error);
 	}

@@ -245,7 +245,8 @@ public:
     bool CopySequencerFirmwareToSDCard(const unsigned int& Sequencer, const char* SDCardPath);
 
     /// @brief Find OpticsFoundry sequencers on all local networks by UDP broadcast (port 57979). Doesn't need an initialized system.
-    /// Each sequencer answers with one line, e.g. "OpticsFoundry sequencer; MAC 02:4F:46:E2:9D:95; IP 192.168.1.159; netmask 255.255.255.0; gateway 192.168.1.1; IP source DHCP; TCP port 57978; build ...".
+    /// Each sequencer answers with one line, e.g. "OpticsFoundry sequencer; MAC 02:4F:46:E2:9D:95; IP 192.168.1.159; netmask 255.255.255.0; gateway 192.168.1.1; IP source DHCP; TCP port 57978; USR button released; build ...".
+    /// To tell boards apart, hold the USR button of one Z-turn board during discovery: it answers "USR button PRESSED" (firmware from 2026-11-28 on).
     /// Sequencers whose IP address is in another subnet than the PC are found, too (but can only be reached after changing their address, see SetSequencerFixedIPByMAC).
     /// Needs sequencer firmware from 2026-11-26 on. Finding no sequencer is not an error.
     /// @param result output buffer receiving the answers, one per line, zero terminated.

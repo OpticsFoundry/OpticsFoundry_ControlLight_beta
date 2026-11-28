@@ -1501,14 +1501,22 @@ void DemoReadConfigEEPROM() {
 void DemoDiscoverSequencers() {
 	//Finds all OpticsFoundry sequencers on the local networks by UDP broadcast, e.g. to find the IP address to put into ControlHardwareConfig.json.
 	//Doesn't need the hardware configuration. Needs sequencer firmware from 2026-11-26 on.
+	//To find out which board is which: hold the USR button of one Z-turn board while this demo runs. That board answers
+	//"USR button PRESSED" (sequencer firmware from 2026-11-28 on). Don't hold the button while switching the board on:
+	//that resets its network settings to DHCP.
 	char result[16384];
 	size_t length = sizeof(result);
 	if (!CLA_DiscoverSequencers(result, length, /*timeout_in_seconds*/ 1.0)) {
 		cout << "Discovery failed: " << CLA_GetLastError() << endl;
 		return;
 	}
-	if (length == 0) cout << "No sequencer found." << endl;
-	else cout << "Sequencers found:" << endl << result;
+	if (length == 0) {
+		cout << "No sequencer found." << endl;
+		return;
+	}
+	cout << "Sequencers found:" << endl << result;
+	if (strstr(result, "USR button PRESSED")) cout << "(The board whose USR button is held answers \"USR button PRESSED\".)" << endl;
+	else cout << "(To identify a board, hold its USR button while running this demo.)" << endl;
 }
 
 void DemoCopySequencerFirmwareToSDCard() {

@@ -9,7 +9,9 @@
  *
  * Discovery: send the UDP datagram "OpticsFoundry_discover" to port 57979, e.g. as broadcast.
  * Each sequencer answers with one line of text to the sender's address and port:
- *   "OpticsFoundry sequencer; MAC ...; IP ...; netmask ...; gateway ...; IP source <DHCP|fixed|link-local ...>; TCP port 57978; build ...; ..."
+ *   "OpticsFoundry sequencer; MAC ...; IP ...; netmask ...; gateway ...; IP source <DHCP|fixed|link-local ...>; TCP port 57978;
+ *    USR button <PRESSED|released>; build ...; ..."
+ * To find out which board is which, hold the USR button of one board while discovering (since 2026-11-28).
  * The answer is sent by unicast if the sender is in the sequencer's subnet, otherwise by broadcast,
  * so that sequencers with an IP address of another subnet can be found, too.
  * The same UDP port receives the command OpticsFoundry_set_network, see network_settings.h.

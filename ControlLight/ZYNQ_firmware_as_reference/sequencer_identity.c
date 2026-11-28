@@ -75,7 +75,9 @@ static void DiscoveryReceive(void *arg, struct udp_pcb *pcb, struct pbuf *p, con
 	char reply[600];
 	SequencerIdentity_describe(identity, sizeof(identity));
 	FirmwareUpdate_describe(firmware, sizeof(firmware));
-	int reply_length = snprintf(reply, sizeof(reply), "OpticsFoundry sequencer; %s; TCP port %d; %s", identity, SEQUENCER_TCP_PORT, firmware);
+	/* the USR button state lets the user tell boards apart: hold it on one board while discovering */
+	int reply_length = snprintf(reply, sizeof(reply), "OpticsFoundry sequencer; %s; TCP port %d; USR button %s; %s", identity, SEQUENCER_TCP_PORT,
+			UserButton_pressed() ? "PRESSED" : "released", firmware);
 	if (reply_length <= 0) return;
 	if (reply_length >= (int)sizeof(reply)) reply_length = sizeof(reply) - 1;
 	reply[reply_length] = 0;
